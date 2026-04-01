@@ -3,24 +3,24 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-04-01T14:30:21.548Z"
+last_updated: "2026-04-01T15:30:00.000Z"
 progress:
-  total_phases: 1
-  completed_phases: 0
-  total_plans: 1
-  completed_plans: 0
+  total_phases: 4
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-01 (Phase 1 executed — all 11 tasks complete)
+**Last updated:** 2026-04-01 (Phase 2 executed — all 6 tasks complete)
 **Roadmap:** `.planning/ROADMAP.md`
 
 ---
 
 ## Current Phase
 
-**Phase 1 — MCP Server Infrastructure** (Executed)
+**Phase 2 — Authentication & Sessions** (Executed)
 
 ---
 
@@ -30,7 +30,7 @@ progress:
 |---|---|---|---|---|---|
 | Phase 0 | Project Setup | Not Started | — | — | None |
 | Phase 1 | MCP Server Infrastructure | **Executed** | 2026-04-01 | 2026-04-01 | Phase 0 |
-| Phase 2 | Authentication & Sessions | Not Started | — | — | Phase 1 |
+| Phase 2 | Authentication & Sessions | **Executed** | 2026-04-01 | 2026-04-01 | Phase 1 |
 | Phase 3 | Core Read Tools | Not Started | — | — | Phase 1 |
 | Phase 4 | SKILL.md Package | Not Started | — | — | Phases 1–3 |
 
@@ -44,10 +44,10 @@ progress:
 |---|---|---|---|---|---|
 | Phase 0 | Project Setup | 4 | 0 | 0 | 4 |
 | Phase 1 | MCP Server Infrastructure | 14 | **14** | 0 | 0 |
-| Phase 2 | Authentication & Sessions | 10 | 0 | 0 | 10 |
+| Phase 2 | Authentication & Sessions | 10 | **10** | 0 | 0 |
 | Phase 3 | Core Read Tools | 15 | 0 | 0 | 15 |
 | Phase 4 | SKILL.md Package | 3 | 0 | 0 | 3 |
-| **Total** | | **47** | **14** | **0** | **33** |
+| **Total** | | **47** | **24** | **0** | **23** |
 
 ---
 
@@ -75,6 +75,12 @@ progress:
 | Sessions | In-memory per `Mcp-Session-Id` (NOT Redis) | SESS-02 (Phase 2) |
 | SKILL.md | Separate `nautobot-mcp-skill/` pip package | SKILL-01 (Phase 4) |
 | App config | Single-file (`__init__.py` only, no `apps.py`) | Phase 1 execution |
+| Session storage | FastMCP session dict (`session["enabled_scopes"]`, `session["enabled_searches"]`) | D-19 (Phase 2) |
+| Progressive disclosure | `@mcp.list_tools()` override with `ToolContext` | D-20 (Phase 2) |
+| Scope hierarchy | `startswith(f"{scope}.")` prefix matching | D-21 (Phase 2) |
+| Auth log levels | No token → `logger.warning`, Invalid → `logger.debug` | D-22 (Phase 2) |
+| MCPSessionState | Thin dataclass wrapper over FastMCP session dict | D-26 (Phase 2) |
+| Core tools always | `registry.get_core_tools()` always included in list_tools_handler | D-27 (Phase 2) |
 
 ---
 
@@ -87,6 +93,17 @@ progress:
 | `post_migrate` signal guard | `if app_config.name == "nautobot_app_mcp_server"` | Ensures registration runs only once for this app |
 | Registry methods | `get_all`, `get_core_tools`, `get_by_scope`, `fuzzy_search` (no `get_by_tier` separate) | `get_core_tools()` covers core; `get_by_scope("core")` is equivalent |
 | Lazy factory safety | Module-level `_mcp_app: Starlette | None = None` with global check | Double-checked locking not needed (Python GIL + module-level None) |
+
+---
+
+## Phase 2 — Decisions Made During Execution
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| `_setup_mcp_app()` separation | Extracted from `get_mcp_app()` as separate helper | Allows `mcp` instance to be accessible for decorator registration |
+| Session tools registration | Both `@mcp.tool()` decorator AND `register_mcp_tool(tier="core")` | FastMCP needs decorator; MCPToolRegistry needs explicit `register_mcp_tool()` call |
+| MCPSessionState as dataclass | Stored in FastMCP session dict via `from_session`/`apply_to_session` | Clean separation; round-trip serializable to FastMCP session |
+| `get_user_from_request` in `__init__.py` | Exported from `mcp/__init__.py` alongside `register_mcp_tool` | Third-party apps call it to get Nautobot user in their tool handlers |
 
 ---
 
@@ -106,6 +123,7 @@ progress:
 |---|---|---|---|
 | 0.1.0-dev | 2026-04-01 | Phase 1 planned | Initial roadmap created |
 | 0.1.0-dev | 2026-04-01 | Phase 1 executed | All 11 tasks complete; commit 13ca60e |
+| 0.1.0-dev | 2026-04-01 | Phase 2 executed | All 6 tasks complete; 7 commits (c8469cb→750878f) |
 
 ---
 
