@@ -1,3 +1,16 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0.0
+milestone_name: milestone
+status: unknown
+last_updated: "2026-04-01T14:30:21.548Z"
+progress:
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 1
+  completed_plans: 0
+---
+
 # Project State — `nautobot-app-mcp-server`
 
 **Last updated:** 2026-04-01 (Phase 1 executed — all 11 tasks complete)
