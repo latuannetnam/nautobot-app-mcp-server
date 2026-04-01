@@ -112,8 +112,7 @@ nav:
       - Using the App: "user/app_use_cases.md"
       - Frequently Asked Questions: "user/faq.md"
       - External Interactions: "user/external_interactions.md"
-      - Data Models:
-          - : "models/.md"
+      - Data Models: []
   - Administrator Guide:
       - Install and Configure: "admin/install.md"
       - Upgrade: "admin/upgrade.md"
@@ -131,5 +130,4 @@ nav:
       - Code Reference:
           - "dev/code_reference/index.md"
           - Package: "dev/code_reference/package.md"
-          - API: "dev/code_reference/api.md"
   - Nautobot Docs Home ↗︎: "https://docs.nautobot.com"
