@@ -1,0 +1,29 @@
+{
+    "cookiecutter": {
+        "codeowner_github_usernames": "latuannetnam",
+        "full_name": "Le Anh Tuan",
+        "email": "latuannetnam@gmail.com",
+        "github_org": "latuannetnam",
+        "app_name": "nautobot_app_mcp_server",
+        "verbose_name": "Nautobot App MCP Server",
+        "app_slug": "nautobot-app-mcp-server",
+        "project_slug": "nautobot-app-mcp-server",
+        "repo_url": "https://github.com/latuannetnam/nautobot-app-mcp-server",
+        "base_url": "mcp-server",
+        "camel_name": "NautobotAppMcpServer",
+        "project_short_description": "Nautobot MCP Server App",
+        "model_class_name": "",
+        "open_source_license": "Apache-2.0",
+        "docs_base_url": "https://docs.nautobot.com",
+        "docs_app_url": "https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest",
+        "_extensions": [
+            "local_extensions.camel_case_to_kebab",
+            "local_extensions.camel_case_to_words",
+            "local_extensions.NautobotVersions"
+        ],
+        "_template": "https://github.com/nautobot/cookiecutter-nautobot-app.git",
+        "_output_dir": "/tmp/cc-output",
+        "_repo_dir": "/home/latuan/.cookiecutters/cookiecutter-nautobot-app/nautobot-app",
+        "_checkout": null
+    }
+}
