@@ -240,20 +240,22 @@ nautobot-mcp-skill/
 
 | Req ID | Requirement | Status |
 |---|---|---|
-| FOUND-02 | Create `nautobot_app_mcp_server/mcp/` package structure | Pending |
-| FOUND-05 | Implement ASGI bridge via `asgiref.wsgi.WsgiToAsgi` | Pending |
-| SRVR-01 | FastMCP instance with `stateless_http=False`, `json_response=True` | Pending |
-| SRVR-02 | `get_mcp_app()` lazy factory — not created at import time | Pending |
-| SRVR-03 | `streamable_http_app()` mounted at `/plugins/nautobot-app-mcp-server/mcp/` | Pending |
-| SRVR-04 | ASGI bridge view (`WsgiToAsgi`) | Pending |
-| SRVR-05 | `urls.py` with `path("mcp/", mcp_view)` auto-discovered by Nautobot | Pending |
-| SRVR-06 | `post_migrate` signal wiring for tool registration | Pending |
-| REGI-01 | `MCPToolRegistry` thread-safe singleton with `threading.Lock` | Pending |
-| REGI-02 | `ToolDefinition` dataclass | Pending |
-| REGI-03 | `register_mcp_tool()` public API | Pending |
-| REGI-04 | `get_core_tools()`, `get_by_scope()`, `fuzzy_search()` registry methods | Pending |
-| TEST-03 | `test_view.py` — ASGI bridge, HTTP round-trip, endpoint reachability | Pending |
-| TEST-04 | `test_signal_integration.py` — `post_migrate` timing | Pending |
+| FOUND-02 | Create `nautobot_app_mcp_server/mcp/` package structure | **Completed** |
+| FOUND-05 | Implement ASGI bridge via `asgiref.wsgi.WsgiToAsgi` | **Completed** |
+| SRVR-01 | FastMCP instance with `stateless_http=False`, `json_response=True` | **Completed** |
+| SRVR-02 | `get_mcp_app()` lazy factory — not created at import time | **Completed** |
+| SRVR-03 | `streamable_http_app()` mounted at `/plugins/nautobot-app-mcp-server/mcp/` | **Completed** |
+| SRVR-04 | ASGI bridge view (`WsgiToAsgi`) | **Completed** |
+| SRVR-05 | `urls.py` with `path("mcp/", mcp_view)` auto-discovered by Nautobot | **Completed** |
+| SRVR-06 | `post_migrate` signal wiring for tool registration | **Completed** |
+| REGI-01 | `MCPToolRegistry` thread-safe singleton with `threading.Lock` | **Completed** |
+| REGI-02 | `ToolDefinition` dataclass | **Completed** |
+| REGI-03 | `register_mcp_tool()` public API | **Completed** |
+| REGI-04 | `get_core_tools()`, `get_by_scope()`, `fuzzy_search()` registry methods | **Completed** |
+| TEST-03 | `test_view.py` — ASGI bridge, HTTP round-trip, endpoint reachability | **Completed** |
+| TEST-04 | `test_signal_integration.py` — `post_migrate` timing | **Completed** |
+
+**Executed:** 2026-04-01, commit `13ca60e`
 
 ### Phase 2 — Authentication & Sessions
 
