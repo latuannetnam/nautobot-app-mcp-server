@@ -42,7 +42,7 @@ Nautobot has no built-in MCP server. AI agents (Claude Code, Claude Desktop) mus
 Claude Code / Claude Desktop / Antigravity / OpenClaw
         │
         │  Streamable HTTP (stateful)
-        │  GET/POST /plugins/nautobot-mcp-server/mcp/
+        │  GET/POST /plugins/nautobot-app-mcp-server/mcp/
         │  Auth: Nautobot session cookie
         │  Mcp-Session-Id: (native MCP, per-conversation)
         ▼
@@ -75,7 +75,7 @@ Claude Code / Claude Desktop / Antigravity / OpenClaw
   ┌─────┴─────────────────────────────┐
   │  netnam_cms_core etc.           │
   │  __init__.py                    │
-  │  from nautobot_mcp_server.mcp   │
+  │  from nautobot_app_mcp_server.mcp   │
   │    import register_mcp_tool      │
   └─────────────────────────────────┘
 
@@ -93,7 +93,7 @@ Also:
 
 ```
 nautobot-app-mcp-server/
-├── nautobot_mcp_server/              # Nautobot app package
+├── nautobot_app_mcp_server/              # Nautobot app package
 │   ├── __init__.py                   # NautobotAppConfig entry point
 │   ├── mcp/
 │   │   ├── __init__.py
@@ -109,7 +109,7 @@ nautobot-app-mcp-server/
 │   │   │   └── query_utils.py         # Shared queryset builders
 │   │   ├── session.py               # MCPSessionState per Mcp-Session-Id
 │   │   ├── auth.py                # Nautobot token auth extraction
-│   └── urls.py                       # URL routing: /plugins/nautobot-mcp-server/mcp/
+│   └── urls.py                       # URL routing: /plugins/nautobot-app-mcp-server/mcp/
 ├── tests/
 │   ├── __init__.py
 │   ├── test_registry.py
@@ -136,7 +136,7 @@ nautobot-mcp-skill/                   # Separate pip package
 
 ### 1. MCP Server — FastMCP Stateful HTTP Mount
 
-**File:** `nautobot_mcp_server/mcp/server.py`
+**File:** `nautobot_app_mcp_server/mcp/server.py`
 
 ```python
 from fastmcp import FastMCP
@@ -170,7 +170,7 @@ def get_mcp_app() -> ASGIApplication:
 **Option A — ASGI bridge via Django view (recommended):**
 
 ```python
-# nautobot_mcp_server/urls.py
+# nautobot_app_mcp_server/urls.py
 from django.urls import path
 from starlette.routing import Route
 from starlette.testclient import ASGITestClient
@@ -190,7 +190,7 @@ def mcp_view(request):
             (k.encode(), v.encode())
             for k, v in request.headers.items()
         ],
-        "root_path": f"/plugins/nautobot-mcp-server",
+        "root_path": f"/plugins/nautobot-app-mcp-server",
         "client": (request.META.get("REMOTE_ADDR", "127.0.0.1"), 0),
     }
     # FastMCP handles HTTP body read / response write directly
@@ -210,7 +210,7 @@ def mcp_view(request):
 
 ```python
 # Run as separate gunicorn worker:
-# gunicorn nautobot_mcp_server.mcp.server:asgi_app --bind 0.0.0.0:9001
+# gunicorn nautobot_app_mcp_server.mcp.server:asgi_app --bind 0.0.0.0:9001
 #
 # Claude Code connects to port 9001 directly:
 # {"mcpServers": {"nautobot": {"url": "http://nautobot:9001/mcp"}}}
@@ -255,7 +255,7 @@ def mcp_list_tools(scope: str | None = None, search: str | None = None):
 
 ### 2. Tool Registry
 
-**File:** `nautobot_mcp_server/mcp/registry.py`
+**File:** `nautobot_app_mcp_server/mcp/registry.py`
 
 ```python
 from dataclasses import dataclass
@@ -331,14 +331,14 @@ class MCPToolRegistry:
 
 ### 3. Tool Registration API
 
-**File:** `nautobot_mcp_server/mcp/__init__.py`
+**File:** `nautobot_app_mcp_server/mcp/__init__.py`
 
 ```python
 # Public API exposed to third-party Nautobot apps.
-# Import path for third-party apps: from nautobot_mcp_server.mcp import register_mcp_tool
+# Import path for third-party apps: from nautobot_app_mcp_server.mcp import register_mcp_tool
 # (not from nautobot.apps — that package does not exist)
 
-from nautobot_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
+from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 
 def register_mcp_tool(
     name: str,
@@ -369,7 +369,7 @@ def register_mcp_tool(
 **Usage by netnam_cms_core:**
 ```python
 # netnam_cms_core/__init__.py
-from nautobot_mcp_server.mcp import register_mcp_tool
+from nautobot_app_mcp_server.mcp import register_mcp_tool
 
 def juniper_interface_unit_list(device_name: str, limit: int = 25, cursor: str | None = None):
     ...
@@ -394,14 +394,14 @@ register_mcp_tool(
 
 ### 4. NautobotAppConfig — Registration and MCPSessionState
 
-**File:** `nautobot_mcp_server/__init__.py`
+**File:** `nautobot_app_mcp_server/__init__.py`
 
 Registration uses `post_migrate` (not `ready()`). Django's `post_migrate` fires after all app migrations — which is after every `ready()` hook has completed. This guarantees the MCP server's core tools are registered before any third-party app calls `register_mcp_tool()` in its own `ready()` hook.
 
 ```python
 class NautobotMcpServerConfig(NautobotAppConfig):
-    name = "nautobot_mcp_server"
-    base_url = "nautobot-mcp-server"
+    name = "nautobot_app_mcp_server"
+    base_url = "nautobot-app-mcp-server"
 
     def ready(self):
         # FastMCP ASGI app is lazily initialized on first HTTP request.
@@ -418,7 +418,7 @@ class NautobotMcpServerConfig(NautobotAppConfig):
             registry.register(tool)
 ```
 
-**File:** `nautobot_mcp_server/mcp/session.py`
+**File:** `nautobot_app_mcp_server/mcp/session.py`
 
 Per-conversation scope state, stored in FastMCP's session manager:
 
@@ -467,7 +467,7 @@ class MCPSessionState:
         return tools
 ```
 
-**File:** `nautobot_mcp_server/mcp/apps.py`
+**File:** `nautobot_app_mcp_server/mcp/apps.py`
 
 Connect `register_mcp_tools` to `post_migrate` so it runs after all migrations and all `ready()` hooks:
 
@@ -476,15 +476,15 @@ from nautobot.apps import NautobotAppConfig
 from django.db.models.signals import post_migrate
 
 class NautobotMcpServerConfig(NautobotAppConfig):
-    name = "nautobot_mcp_server"
-    base_url = "nautobot-mcp-server"
+    name = "nautobot_app_mcp_server"
+    base_url = "nautobot-app-mcp-server"
 
     def ready(self):
         post_migrate.connect(self._on_post_migrate, sender=self)
 
     @staticmethod
     def _on_post_migrate(app_config, **kwargs):
-        if app_config.name == "nautobot_mcp_server":
+        if app_config.name == "nautobot_app_mcp_server":
             # Only run once (when this app's migrations complete)
             # At this point all other apps' ready() hooks have already run,
             # so their register_mcp_tool() calls are already in the registry.
@@ -493,7 +493,7 @@ class NautobotMcpServerConfig(NautobotAppConfig):
 
 ### 5. Core Tools (Tier: Core, Always Visible)
 
-**File:** `nautobot_mcp_server/mcp/tools/core.py`
+**File:** `nautobot_app_mcp_server/mcp/tools/core.py`
 
 All core tools are sync functions decorated with `@register_core_tool`. They are wrapped by the async FastMCP handler which calls them via `sync_to_async`.
 
@@ -524,7 +524,7 @@ Note: meta tools are registered as `"core"` tier so they appear in the manifest 
 
 ### 6. Pagination + Auto-Summarize
 
-**File:** `nautobot_mcp_server/mcp/tools/pagination.py`
+**File:** `nautobot_app_mcp_server/mcp/tools/pagination.py`
 
 Key fix: count items **before** slicing to determine whether to summarize. Also fetch all items first to get an accurate count, then slice.
 
@@ -754,41 +754,41 @@ All list tools accept:
 | Action | File |
 |---|---|
 | CREATE | `nautobot-app-mcp-server/pyproject.toml` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/__init__.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/apps.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/urls.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/mcp/__init__.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/mcp/server.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/mcp/registry.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/mcp/session.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/mcp/auth.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/mcp/tools/__init__.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/mcp/tools/core.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/mcp/tools/pagination.py` |
-| CREATE | `nautobot-app-mcp-server/nautobot_mcp_server/mcp/tools/query_utils.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/__init__.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/apps.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/urls.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/mcp/__init__.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/mcp/server.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/mcp/registry.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/mcp/session.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/mcp/auth.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/mcp/tools/__init__.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/mcp/tools/core.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/mcp/tools/pagination.py` |
+| CREATE | `nautobot-app-mcp-server/nautobot_app_mcp_server/mcp/tools/query_utils.py` |
 | CREATE | `nautobot-mcp-skill/pyproject.toml` |
 | CREATE | `nautobot-mcp-skill/SKILL.md` |
 | CREATE | `nautobot-mcp-skill/reference/*.md` |
-| MODIFY | `netnam_cms_core/__init__.py` — add `from nautobot_mcp_server.mcp import register_mcp_tool` call |
+| MODIFY | `netnam_cms_core/__init__.py` — add `from nautobot_app_mcp_server.mcp import register_mcp_tool` call |
 
 **Removed:** `signals.py` — replaced by `apps.py` (`post_migrate` signal handler) + `session.py` (`MCPSessionState`).
 
 **Reuse from existing code:**
-- `nautobot_mcp_server/mcp/tools/query_utils.py` reuses `for_list_view()` / `for_detail_view()` patterns from `netnam-cms-core/netnam_cms_core/models/querysets.py`
+- `nautobot_app_mcp_server/mcp/tools/query_utils.py` reuses `for_list_view()` / `for_detail_view()` patterns from `netnam-cms-core/netnam_cms_core/models/querysets.py`
 - Pagination approach mirrors `NautobotModelViewSet.get_queryset()` action-based queryset splitting
 
 ---
 
 ## Verification
 
-1. **Install the app:** Add `nautobot_mcp_server` to `PLUGINS` in `nautobot_config.py`, run migrations
-2. **MCP endpoint reachable:** `curl http://localhost:8080/plugins/nautobot-mcp-server/mcp/` → returns MCP JSON-RPC response (not 404)
+1. **Install the app:** Add `nautobot_app_mcp_server` to `PLUGINS` in `nautobot_config.py`, run migrations
+2. **MCP endpoint reachable:** `curl http://localhost:8080/plugins/nautobot-app-mcp-server/mcp/` → returns MCP JSON-RPC response (not 404)
 3. **List tools:** MCP `POST /tools/list` with session → returns 13 tools (10 core + 3 meta)
 4. **Call a tool:** `POST /tools/call` with `device_list(limit=5)` → returns 5 devices, cursor present
 5. **Scope enable:** `mcp_enable_tools(scope="netnam_cms_core")` → returns summary showing scope activated
 6. **List scoped tools:** `mcp_list_tools()` → returns all tools including Juniper (after scope enabled)
 7. **Register third-party:** Install `netnam_cms_core` → its tools appear in `mcp_list_tools()`
-8. **Claude Code (Option B):** `claude mcp add nautobot-mcp-server http://localhost:9001/mcp`
+8. **Claude Code (Option B):** `claude mcp add nautobot-app-mcp-server http://localhost:9001/mcp`
 9. **Skill install:** `claude skill add /path/to/nautobot-mcp-skill`
 10. **Large query test:** `device_list(limit=1000)` → verifies cursor pagination works, memory bounded
 11. **Auto-summarize:** `device_list(limit=1000)` on a >100-device result → summary dict returned with sample
@@ -800,7 +800,7 @@ All list tools accept:
 
 ### 9. Authentication
 
-**File:** `nautobot_mcp_server/mcp/auth.py`
+**File:** `nautobot_app_mcp_server/mcp/auth.py`
 
 Each tool enforces Nautobot permissions via `.restrict(user, action)`. Auth is via Nautobot API token sent in the `Authorization: Token nbapikey_xxx` header on every request.
 
@@ -839,7 +839,7 @@ async def device_list(name: str | None = None, limit: int = 25, cursor: str | No
   "mcpServers": {
     "nautobot": {
       "command": "uvicorn",
-      "args": ["nautobot_mcp_server.mcp.server:app", "--host", "0.0.0.0", "--port", "9001"],
+      "args": ["nautobot_app_mcp_server.mcp.server:app", "--host", "0.0.0.0", "--port", "9001"],
       "env": {
         "NAUTOBOT_MCP_SERVER__TOKEN": "nbapikey_xxxxxxxxxxxxxxxx"
       }

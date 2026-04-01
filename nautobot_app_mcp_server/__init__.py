@@ -16,11 +16,31 @@ class NautobotAppMcpServerConfig(NautobotAppConfig):
     version = __version__
     author = "Le Anh Tuan"
     description = "Nautobot MCP Server App."
-    base_url = "mcp-server"
+    base_url = "nautobot-app-mcp-server"
     required_settings = []
     default_settings = {}
     docs_view_name = "plugins:nautobot_app_mcp_server:docs"
     searchable_models = []
+    urls = ["nautobot_app_mcp_server.urls"]
+
+    def ready(self) -> None:
+        """Connect post_migrate signal for tool registration.
+
+        post_migrate fires after migrations for this app complete.
+        At that point all other apps' ready() hooks have already run,
+        so their register_mcp_tool() calls are already in the registry.
+        """
+        from django.db.models.signals import post_migrate
+
+        post_migrate.connect(self._on_post_migrate, sender=self)
+
+    @staticmethod
+    def _on_post_migrate(app_config, **kwargs) -> None:
+        """Register MCP tools after this app's migrations complete."""
+        if app_config.name == "nautobot_app_mcp_server":
+            from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry
+
+            registry = MCPToolRegistry.get_instance()
 
 
 config = NautobotAppMcpServerConfig  # pylint:disable=invalid-name
