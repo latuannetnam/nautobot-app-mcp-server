@@ -1,0 +1,341 @@
+# Project Roadmap — `nautobot-app-mcp-server`
+
+**Project:** Nautobot App MCP Server
+**Roadmap defined:** 2026-04-01
+**Horizon:** v1.0.0
+**Phases:** 5 (standard granularity, parallelization enabled)
+
+---
+
+## Overview
+
+This roadmap is derived from 47 v1 requirements across 6 domain areas. Each phase produces a working, testable increment. Phases 1–4 can be developed in parallel by separate workers once Phase 0 is complete.
+
+**Phase dependencies:**
+```
+Phase 0 ──► Phase 1 ──► Phase 3
+                │             ▲
+                ▼             │
+            Phase 2 ──────────┘
+                │
+                ▼
+            Phase 4
+```
+
+- Phase 1 (Infrastructure) must complete before Phase 3 (Tools) can be tested end-to-end.
+- Phase 2 (Auth + Sessions) can be started as soon as Phase 1's registry exists.
+- Phase 4 (SKILL.md) depends on all previous phases being stable.
+
+---
+
+## Phase Summary
+
+| Phase | Name | Requirements | Tests | Key Output |
+|---|---|---|---|---|
+| **Phase 0** | Project Setup | 4 (FOUND-01, 03, 04; TEST-05) | 0 new | `pyproject.toml` updated, coverage threshold set |
+| **Phase 1** | MCP Server Infrastructure | 14 (FOUND-02, 05; SRVR-01–06; REGI-01–04; TEST-03, 04) | 2 test files | FastMCP endpoint reachable at `/plugins/nautobot-app-mcp-server/mcp/` |
+| **Phase 2** | Authentication & Sessions | 10 (REGI-05; AUTH-01–03; SESS-01–06; TEST-06) | 1 test file | Token auth enforced, session scopes functional |
+| **Phase 3** | Core Read Tools | 15 (TOOL-01–10; PAGE-01–05; TEST-02) | 1 test file | 10 core tools + 3 meta tools operational |
+| **Phase 4** | SKILL.md Package | 3 (SKILL-01–03) | 0 new | `nautobot-mcp-skill/` pip package published |
+
+**Total: 47 requirements, 5 phases, 4 test files**
+
+---
+
+## Phase 0 — Project Setup
+
+**Purpose:** Resolve the 3 blocking issues identified in the codebase survey before any implementation begins. Set coverage policy.
+
+**Requirements:**
+
+| ID | Requirement |
+|---|---|
+| FOUND-01 | Add `mcp ^1.26.0`, `fastmcp ^3.2.0`, `asgiref ^3.11.1` to `pyproject.toml` |
+| FOUND-03 | Resolve package name — use `nautobot_app_mcp_server` everywhere (not `nautobot_mcp_server`) |
+| FOUND-04 | Resolve `base_url` — use `nautobot-app-mcp-server` (matches Nautobot plugin convention); endpoint at `/plugins/nautobot-app-mcp-server/mcp/` |
+| TEST-05 | Set `fail_under = 50` for coverage in `pyproject.toml` |
+
+**Not included:** FOUND-02 (package structure creation) belongs in Phase 1 where it is first needed.
+
+**Success Criteria:**
+
+1. `poetry lock && poetry install` succeeds with no resolution errors
+2. `poetry run python -c "import mcp, fastmcp, asgiref; print('deps OK')"` succeeds
+3. `base_url` in `__init__.py` is `nautobot-app-mcp-server`
+4. All imports use `nautobot_app_mcp_server` (not `nautobot_mcp_server`)
+5. `poetry run coverage` run on existing tests does not fail due to missing threshold config
+
+**Verification:** `poetry run invoke tests` passes on the minimal shell; deps resolve cleanly.
+
+---
+
+## Phase 1 — MCP Server Infrastructure
+
+**Purpose:** Build the embedded FastMCP server scaffold — plugin wiring, ASGI bridge, URL routing, and the tool registry. No auth, no tools yet. This phase validates the core architectural decision (Option A: ASGI bridge via `asgiref.wsgi.WsgiToAsgi`).
+
+**Requirements:**
+
+| ID | Requirement |
+|---|---|
+| FOUND-02 | Create `nautobot_app_mcp_server/mcp/` package structure with `__init__.py` |
+| FOUND-05 | Fix `NotImplementedError` in DESIGN.md Option A — implement ASGI bridge via `asgiref.wsgi.WsgiToAsgi` |
+| SRVR-01 | FastMCP instance with `stateless_http=False`, `json_response=True` |
+| SRVR-02 | `get_mcp_app()` lazy factory — ASGI app created on first HTTP request, not at import time |
+| SRVR-03 | `streamable_http_app()` mounted at `/plugins/nautobot-app-mcp-server/mcp/` via Django URL route |
+| SRVR-04 | ASGI bridge view (`WsgiToAsgi`) converting Django request → FastMCP ASGI → Django response |
+| SRVR-05 | `urls.py` with `path("mcp/", mcp_view)` — auto-discovered by Nautobot plugin system |
+| SRVR-06 | `post_migrate` signal wiring core tools registration after all apps' `ready()` hooks |
+| REGI-01 | `MCPToolRegistry` thread-safe singleton with `threading.Lock` |
+| REGI-02 | `ToolDefinition` dataclass with name, func, description, input_schema, tier, scope fields |
+| REGI-03 | `register_mcp_tool()` public API for third-party Nautobot apps |
+| REGI-04 | `get_core_tools()`, `get_by_scope()`, `fuzzy_search()` registry methods |
+| TEST-03 | `test_view.py` — ASGI bridge, HTTP round-trip, endpoint reachability |
+| TEST-04 | `test_signal_integration.py` — `post_migrate` timing, tool registration, third-party tool discovery |
+
+**Success Criteria:**
+
+1. `GET /plugins/nautobot-app-mcp-server/mcp/` returns a valid MCP JSON-RPC response (HTTP 200, no 500)
+2. `POST /plugins/nautobot-app-mcp-server/mcp/` with an MCP `initialize` request returns a valid MCP `initialize` response
+3. `MCPToolRegistry` is a true singleton — two instantiations return the same object; `threading.Lock` prevents race on concurrent `register()`
+4. `register_mcp_tool()` can be called from a `post_migrate` signal and the tool appears in `get_core_tools()`
+5. `get_mcp_app()` called twice returns the same app object (lazy factory, not re-created)
+6. `test_view.py` endpoint reachability test passes
+7. `test_signal_integration.py` `post_migrate` timing test passes
+
+**Known pitfalls to avoid (from PITFALLS.md):**
+- PIT-02: Package name `nautobot_mcp_server` vs `nautobot_app_mcp_server` — must match
+- PIT-03: ASGI app created at import time (use lazy factory)
+- PIT-04: Wrong ASGI bridge (`async_to_sync` instead of `WsgiToAsgi`)
+- PIT-09: `base_url` mismatch
+- PIT-14: `search_by_name` complexity underestimated (defer to Phase 3)
+
+---
+
+## Phase 2 — Authentication & Sessions
+
+**Purpose:** Add token-based auth and per-session tool visibility state. Auth extracts the Nautobot user from the MCP request context; sessions track which tool scopes are enabled per `Mcp-Session-Id`.
+
+**Requirements:**
+
+| ID | Requirement |
+|---|---|
+| REGI-05 | `@mcp.list_tools()` override for progressive disclosure — returns session-active tools only |
+| AUTH-01 | `get_user_from_request()` extracting Nautobot user from MCP request context `Authorization: Token nbapikey_xxx` header |
+| AUTH-02 | `AnonymousUser` returns empty queryset (not error) with debug warning logged |
+| AUTH-03 | Nautobot object-level permissions via `.restrict(user, action="view")` on every queryset |
+| SESS-01 | `MCPSessionState` dataclass with `enabled_scopes` and `enabled_searches` |
+| SESS-02 | Session state stored per `Mcp-Session-Id` via FastMCP `StreamableHTTPSessionManager` |
+| SESS-03 | `mcp_enable_tools(scope=...)` tool enabling exact scope + children and fuzzy search |
+| SESS-04 | `mcp_disable_tools(scope=...)` tool disabling scopes |
+| SESS-05 | `mcp_list_tools()` tool returning all registered tools filtered by session state |
+| SESS-06 | Core tools always enabled regardless of session state |
+| TEST-06 | Auth test: valid token → data, invalid token → empty + warning logged |
+
+**Note:** REGI-05 (progressive disclosure via `@mcp.list_tools()`) requires the FastMCP instance from Phase 1.
+
+**Success Criteria:**
+
+1. Valid `Authorization: Token nbapikey_xxx` header → `request.user` is the correct Nautobot user
+2. Missing or invalid token → `AnonymousUser`, empty queryset returned, `WARNING` log line emitted
+3. `mcp_enable_tools(scope="ipam")` enables all IPAM tools; `mcp_disable_tools(scope="ipam")` disables them
+4. `mcp_list_tools()` returns 3 core meta tools + all enabled scope tools (core tools always present)
+5. All querysets call `.restrict(user, action="view")` — verified by mock assertion in tests
+6. `test_auth` (TEST-06) passes: valid token → queryset has data; invalid token → queryset is empty
+
+**Known pitfalls to avoid:**
+- PIT-10: Anonymous auth silent empty results (must log warning)
+- PIT-16: Auth token from wrong request object (use MCP request context, not Django `request`)
+
+---
+
+## Phase 3 — Core Read Tools
+
+**Purpose:** Implement all 10 core read tools and 3 meta tools with pagination, serialization, and permission enforcement. This is the largest phase — 15 requirements.
+
+**Requirements:**
+
+| ID | Requirement |
+|---|---|
+| TOOL-01 | `device_list` — list devices with status, platform, location; `select_related`; paginate; `restrict(user)` |
+| TOOL-02 | `device_get` — single device by name or pk with interfaces prefetched |
+| TOOL-03 | `interface_list` — list interfaces filtered by device_name; paginate; `restrict(user)` |
+| TOOL-04 | `interface_get` — single interface by pk with ip_addresses prefetched |
+| TOOL-05 | `ipaddress_list` — list IP addresses with tenant, vrf; paginate; `restrict(user)` |
+| TOOL-06 | `ipaddress_get` — single IP address by address or pk with interfaces prefetched |
+| TOOL-07 | `prefix_list` — list prefixes with vrf, tenant; paginate; `restrict(user)` |
+| TOOL-08 | `vlan_list` — list VLANs with site, group; paginate; `restrict(user)` |
+| TOOL-09 | `location_list` — list locations with location_type, parent; paginate; `restrict(user)` |
+| TOOL-10 | `search_by_name` — multi-model name search across devices, interfaces, IPs, prefixes, VLANs, locations |
+| PAGE-01 | `paginate_queryset(qs, limit, cursor)` with `LIMIT_DEFAULT=25`, `LIMIT_MAX=1000` |
+| PAGE-02 | `LIMIT_SUMMARIZE=100` — auto-summarize when raw count > 100, count BEFORE slicing |
+| PAGE-03 | `PaginatedResult` dataclass with items, cursor, total_count, summary fields |
+| PAGE-04 | Cursor encoding as `base64(str(pk))` — works for UUID and string PKs |
+| PAGE-05 | `sync_to_async(fn, thread_sensitive=True)` for all ORM calls inside async tool handlers |
+| TEST-02 | `test_core_tools.py` — ORM mocking, pagination, auth enforcement, anonymous fallback |
+
+**Implementation note:** TOOL-10 (`search_by_name`) requires multi-model queries — see PIT-14. Estimate it as 2–3× the effort of a single-model tool.
+
+**Success Criteria:**
+
+1. Each tool returns a `PaginatedResult` with `items`, `cursor`, `total_count`, and `summary` (when count > 100)
+2. `paginate_queryset` counts BEFORE slicing — auto-summarize fires correctly at 100+
+3. Cursor encoding/decoding round-trips correctly for both UUID and string primary keys
+4. All ORM calls use `sync_to_async(..., thread_sensitive=True)` — no thread-local pool errors
+5. `device_get` returns interfaces prefetched; `interface_get` returns ip_addresses prefetched
+6. `search_by_name(" juniper ")` fuzzy-matches device names; results limited to 25 by default, max 1000
+7. All tools respect `.restrict(user, action="view")` — mock test asserts this on every queryset call
+8. `test_core_tools.py` passes with mocked ORM (no real Nautobot database required for unit tests)
+
+**Known pitfalls to avoid:**
+- PIT-07: Pagination counts after slice (auto-summarize never fires) — count BEFORE `qs[:limit]`
+
+---
+
+## Phase 4 — SKILL.md Package
+
+**Purpose:** Package the SKILL.md documentation as a standalone pip package consumable by AI agents. This closes the "progressive disclosure" loop — agents can read the skill file to understand available tools and workflows.
+
+**Requirements:**
+
+| ID | Requirement |
+|---|---|
+| SKILL-01 | `nautobot-mcp-skill/` pip package with SKILL.md |
+| SKILL-02 | SKILL.md with Core Tools reference table, scope management patterns, pagination docs |
+| SKILL-03 | SKILL.md with investigation workflows (investigate device, find by name, explore Juniper BGP) |
+
+**Package structure:**
+```
+nautobot-mcp-skill/
+├── SKILL.md              # Primary skill definition
+├── pyproject.toml
+└── nautobot_mcp_skill/
+    └── __init__.py        # Version, metadata
+```
+
+**Success Criteria:**
+
+1. `pip install nautobot-mcp-skill` installs the package without errors
+2. `SKILL.md` exists at package root with a Core Tools reference table (all 10 core + 3 meta tools)
+3. `SKILL.md` documents scope management: `mcp_enable_tools(scope=...)`, `mcp_disable_tools(scope=...)`, `mcp_list_tools()`
+4. `SKILL.md` documents pagination: default=25, max=1000, summarize-at-100 behavior, cursor format
+5. `SKILL.md` includes at least 3 investigation workflows with step-by-step tool sequences:
+   - Investigate device by name
+   - Find IP address by prefix
+   - Explore device interfaces and BGP addresses
+
+---
+
+## Requirements Traceability
+
+### Phase 0 — Project Setup
+
+| Req ID | Requirement | Status |
+|---|---|---|
+| FOUND-01 | Add `mcp`, `fastmcp`, `asgiref` dependencies to `pyproject.toml` | Pending |
+| FOUND-03 | Use `nautobot_app_mcp_server` everywhere (not `nautobot_mcp_server`) | Pending |
+| FOUND-04 | Use `nautobot-app-mcp-server` as `base_url` | Pending |
+| TEST-05 | Coverage threshold `fail_under = 50` in `pyproject.toml` | Pending |
+
+### Phase 1 — MCP Server Infrastructure
+
+| Req ID | Requirement | Status |
+|---|---|---|
+| FOUND-02 | Create `nautobot_app_mcp_server/mcp/` package structure | Pending |
+| FOUND-05 | Implement ASGI bridge via `asgiref.wsgi.WsgiToAsgi` | Pending |
+| SRVR-01 | FastMCP instance with `stateless_http=False`, `json_response=True` | Pending |
+| SRVR-02 | `get_mcp_app()` lazy factory — not created at import time | Pending |
+| SRVR-03 | `streamable_http_app()` mounted at `/plugins/nautobot-app-mcp-server/mcp/` | Pending |
+| SRVR-04 | ASGI bridge view (`WsgiToAsgi`) | Pending |
+| SRVR-05 | `urls.py` with `path("mcp/", mcp_view)` auto-discovered by Nautobot | Pending |
+| SRVR-06 | `post_migrate` signal wiring for tool registration | Pending |
+| REGI-01 | `MCPToolRegistry` thread-safe singleton with `threading.Lock` | Pending |
+| REGI-02 | `ToolDefinition` dataclass | Pending |
+| REGI-03 | `register_mcp_tool()` public API | Pending |
+| REGI-04 | `get_core_tools()`, `get_by_scope()`, `fuzzy_search()` registry methods | Pending |
+| TEST-03 | `test_view.py` — ASGI bridge, HTTP round-trip, endpoint reachability | Pending |
+| TEST-04 | `test_signal_integration.py` — `post_migrate` timing | Pending |
+
+### Phase 2 — Authentication & Sessions
+
+| Req ID | Requirement | Status |
+|---|---|---|
+| REGI-05 | `@mcp.list_tools()` override for progressive disclosure | Pending |
+| AUTH-01 | `get_user_from_request()` from MCP request context `Authorization: Token` | Pending |
+| AUTH-02 | `AnonymousUser` returns empty queryset + debug warning | Pending |
+| AUTH-03 | `.restrict(user, action="view")` on every queryset | Pending |
+| SESS-01 | `MCPSessionState` dataclass with `enabled_scopes` and `enabled_searches` | Pending |
+| SESS-02 | Session state stored per `Mcp-Session-Id` via FastMCP session manager | Pending |
+| SESS-03 | `mcp_enable_tools(scope=...)` tool | Pending |
+| SESS-04 | `mcp_disable_tools(scope=...)` tool | Pending |
+| SESS-05 | `mcp_list_tools()` tool | Pending |
+| SESS-06 | Core tools always enabled regardless of session state | Pending |
+| TEST-06 | Auth test: valid token → data, invalid → empty + warning | Pending |
+
+### Phase 3 — Core Read Tools
+
+| Req ID | Requirement | Status |
+|---|---|---|
+| TOOL-01 | `device_list` | Pending |
+| TOOL-02 | `device_get` | Pending |
+| TOOL-03 | `interface_list` | Pending |
+| TOOL-04 | `interface_get` | Pending |
+| TOOL-05 | `ipaddress_list` | Pending |
+| TOOL-06 | `ipaddress_get` | Pending |
+| TOOL-07 | `prefix_list` | Pending |
+| TOOL-08 | `vlan_list` | Pending |
+| TOOL-09 | `location_list` | Pending |
+| TOOL-10 | `search_by_name` | Pending |
+| PAGE-01 | `paginate_queryset(qs, limit, cursor)` with `LIMIT_DEFAULT=25`, `LIMIT_MAX=1000` | Pending |
+| PAGE-02 | `LIMIT_SUMMARIZE=100` — count BEFORE slicing, auto-summarize | Pending |
+| PAGE-03 | `PaginatedResult` dataclass | Pending |
+| PAGE-04 | Cursor encoding as `base64(str(pk))` | Pending |
+| PAGE-05 | `sync_to_async(fn, thread_sensitive=True)` for all ORM calls | Pending |
+| TEST-02 | `test_core_tools.py` — ORM mocking, pagination, auth | Pending |
+
+### Phase 4 — SKILL.md Package
+
+| Req ID | Requirement | Status |
+|---|---|---|
+| SKILL-01 | `nautobot-mcp-skill/` pip package | Pending |
+| SKILL-02 | SKILL.md with tools table, scope docs, pagination docs | Pending |
+| SKILL-03 | SKILL.md with investigation workflows | Pending |
+
+---
+
+## Phase Exit Gates
+
+| Phase | Gate | Verification Command |
+|---|---|---|
+| Phase 0 | All 3 deps resolve; `base_url` and package name correct | `poetry lock && poetry install` |
+| Phase 1 | MCP endpoint returns valid JSON-RPC; registry tests green | `poetry run invoke tests` |
+| Phase 2 | Auth tests pass; session tools respond correctly | `poetry run invoke tests` |
+| Phase 3 | All 10 core + 3 meta tools return `PaginatedResult`; coverage ≥ 50% | `poetry run invoke coverage` |
+| Phase 4 | `pip install nautobot-mcp-skill` succeeds; SKILL.md complete | `pip install ./nautobot-mcp-skill` |
+
+---
+
+## Quick Reference
+
+**MCP Endpoint:** `GET/POST /plugins/nautobot-app-mcp-server/mcp/`
+
+**Package name:** `nautobot_app_mcp_server`
+
+**Stack (resolved):**
+- `mcp ^1.26.0` — official Anthropic MCP SDK
+- `fastmcp ^3.2.0` — Prefect's FastMCP framework
+- `asgiref ^3.11.1` — ASGI bridge (`WsgiToAsgi`)
+- No `django-starlette` (does not exist on PyPI)
+- No `channels` or `uvicorn` (not needed for Option A)
+
+**Architecture:** Option A — FastMCP ASGI app embedded in Django via `plugin_patterns` + `WsgiToAsgi`
+
+**Pagination:** Cursor-based, `base64(str(pk))` cursor, `LIMIT_DEFAULT=25`, `LIMIT_MAX=1000`, `LIMIT_SUMMARIZE=100`
+
+**Auth:** Token from MCP request context `Authorization: Token nbapikey_xxx`; `.restrict(user, action="view")` on all querysets
+
+**Session:** In-memory per `Mcp-Session-Id`; 3 scope tiers (core, dcim, ipam); core tools always enabled
+
+---
+
+*Roadmap defined: 2026-04-01*
+*Derived from: REQUIREMENTS.md (47 requirements), research/SUMMARY.md, config.json*
