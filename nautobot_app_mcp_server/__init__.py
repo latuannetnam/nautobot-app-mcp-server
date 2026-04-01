@@ -40,7 +40,7 @@ class NautobotAppMcpServerConfig(NautobotAppConfig):
         if app_config.name == "nautobot_app_mcp_server":
             from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry
 
-            registry = MCPToolRegistry.get_instance()
+            MCPToolRegistry.get_instance()
 
 
 config = NautobotAppMcpServerConfig  # pylint:disable=invalid-name

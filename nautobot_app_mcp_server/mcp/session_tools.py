@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
-    from mcp.server import Context as ToolContext, ToolInstance
+    from mcp.server import Context as ToolContext
+    from mcp.server import ToolInstance
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,7 @@ async def _list_tools_handler(
         List of MCP ToolInstance objects for the MCP manifest.
     """
     from mcp.server import ToolInstance
+
     from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 
     session = ctx.request_context.session

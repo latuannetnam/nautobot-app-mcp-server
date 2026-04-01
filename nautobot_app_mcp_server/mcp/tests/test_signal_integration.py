@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from django.apps import AppConfig
 from django.db.models.signals import post_migrate
 from django.test import TestCase
 
-from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 from nautobot_app_mcp_server.mcp import register_mcp_tool
+from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 
 
 class RegistrySingletonTestCase(TestCase):
@@ -216,9 +215,6 @@ class PostMigrateSignalTestCase(TestCase):
 
     def test_ready_connects_post_migrate(self):
         """NautobotAppMcpServerConfig.ready() connects post_migrate signal."""
-        # Check that post_migrate has our handler connected
-        receivers = post_migrate.receivers
-        receiver_apps = [r[0]().get("sender") for r in receivers if r]
         # The handler is connected by ready() called at app startup
         # Just verify the signal module is accessible
         self.assertTrue(hasattr(post_migrate, "connect"))

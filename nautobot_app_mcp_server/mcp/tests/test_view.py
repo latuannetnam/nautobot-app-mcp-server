@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from django.test import Client, TestCase, override_settings
+from django.test import TestCase, override_settings
 
 
 class MCPViewTestCase(TestCase):

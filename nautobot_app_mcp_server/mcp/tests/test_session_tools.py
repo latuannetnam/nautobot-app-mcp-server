@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 from django.test import TestCase
 
@@ -73,8 +73,6 @@ class ProgressiveDisclosureTestCase(TestCase):
 
     def test_core_tools_always_returned(self):
         """SESS-06: Core tools present even with empty session state."""
-        from nautobot_app_mcp_server.mcp.session_tools import _list_tools_handler
-
         registry = MCPToolRegistry.get_instance()
         # Register a known core tool
         registry.register(
@@ -87,7 +85,6 @@ class ProgressiveDisclosureTestCase(TestCase):
             )
         )
         try:
-            ctx = self._make_mock_ctx(enabled_scopes=set(), enabled_searches=set())
             core_names = [t.name for t in registry.get_core_tools()]
             self.assertIn("test_core_progressive", core_names)
         finally:
@@ -122,8 +119,6 @@ class ProgressiveDisclosureTestCase(TestCase):
 
     def test_scope_enabling_returns_matching_tools(self):
         """Enabling a scope makes matching tools visible."""
-        from nautobot_app_mcp_server.mcp.session_tools import MCPSessionState
-
         registry = MCPToolRegistry.get_instance()
         registry.register(
             ToolDefinition(
@@ -137,8 +132,6 @@ class ProgressiveDisclosureTestCase(TestCase):
             )
         )
         try:
-            session = {"enabled_scopes": {"test_app.view"}, "enabled_searches": set()}
-            state = MCPSessionState.from_session(session)
             tools = registry.get_by_scope("test_app.view")
             self.assertEqual(len(tools), 1)
             self.assertEqual(tools[0].name, "test_scope_visible")

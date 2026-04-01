@@ -18,8 +18,9 @@ from typing import TYPE_CHECKING
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
+    from mcp.server import Context as ToolContext
+    from mcp.server import ToolInstance
     from starlette.applications import Starlette
-    from mcp.server import Context as ToolContext, ToolInstance
 
 # Module-level globals — NOT initialized at import time (PIT-03)
 _mcp_app: Starlette | None = None
@@ -33,10 +34,10 @@ def _setup_mcp_app() -> FastMCP:
     """
     # noqa: F401 — imports register decorators on the returned `mcp` instance
     from nautobot_app_mcp_server.mcp.session_tools import (  # pylint: disable=import-outside-toplevel
-        mcp_enable_tools,
-        mcp_disable_tools,
-        mcp_list_tools,
         _list_tools_handler,
+        mcp_disable_tools,
+        mcp_enable_tools,
+        mcp_list_tools,
     )
 
     mcp = FastMCP(

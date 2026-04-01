@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Token prefix used by Nautobot API tokens
-TOKEN_PREFIX = "nbapikey_"
+TOKEN_PREFIX = "nbapikey_"  # noqa: S105
 
 
 def get_user_from_request(ctx: ToolContext):  # noqa: ANN201

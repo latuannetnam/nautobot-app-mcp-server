@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from django.contrib.auth.models import AnonymousUser
 from django.test import TestCase
@@ -68,13 +68,15 @@ class GetUserFromRequestTestCase(TestCase):
             User.objects.create_superuser(
                 username="testadmin",
                 email="admin@test.local",
-                password="testpass",
+                password="testpass",  # noqa: S106
             )
         user_obj = User.objects.filter(is_superuser=True).first()
 
         token = Token.objects.create(user=user_obj, key="nbapikey_testauthtoken123")
 
         try:
+            from nautobot_app_mcp_server.mcp.auth import get_user_from_request
+
             ctx = self._make_mock_ctx(
                 authorization=f"Token nbapikey_{token.key}",
             )
