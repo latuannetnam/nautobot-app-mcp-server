@@ -12,12 +12,15 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Nautobot MCP server embedded in Django process via FastMCP ASGI app
+- [x] MCPToolRegistry singleton (thread-safe, in-memory) for tool registration
+- [x] `post_migrate` signal for tool registration (runs after all apps' ready() hooks)
+- [x] Public `register_mcp_tool()` API for third-party Nautobot apps
 
 ### Active
 
 - [ ] Nautobot MCP server embedded in Django process via FastMCP ASGI app
-- [ ] Streamable HTTP endpoint at `/plugins/nautobot-mcp-server/mcp/` with `stateless_http=False`
+- [ ] Streamable HTTP endpoint at `/plugins/nautobot-app-mcp-server/mcp/` with `stateless_http=False`
 - [ ] 10 Core read tools: device_list, device_get, interface_list, interface_get, ipaddress_list, ipaddress_get, prefix_list, vlan_list, location_list, search_by_name
 - [ ] 3 Meta tools: mcp_enable_tools, mcp_disable_tools, mcp_list_tools
 - [ ] MCPToolRegistry singleton (thread-safe, in-memory) for tool registration
