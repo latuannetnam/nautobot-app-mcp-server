@@ -30,9 +30,15 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 
-__all__ = ["MCPToolRegistry", "ToolDefinition", "register_mcp_tool"]
+__all__ = [
+    "MCPToolRegistry",
+    "ToolDefinition",
+    "get_user_from_request",
+    "register_mcp_tool",
+]
 
 
 def register_mcp_tool(
