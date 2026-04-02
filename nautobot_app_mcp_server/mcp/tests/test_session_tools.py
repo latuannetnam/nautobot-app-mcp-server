@@ -174,10 +174,7 @@ class ScopeHierarchyTestCase(TestCase):
         state = MCPSessionState.from_session(session)
 
         # Simulate disable("dcim") — remove dcim and all children
-        to_remove = {
-            s for s in state.enabled_scopes
-            if s == "dcim" or s.startswith("dcim.")
-        }
+        to_remove = {s for s in state.enabled_scopes if s == "dcim" or s.startswith("dcim.")}
         state.enabled_scopes -= to_remove
 
         self.assertNotIn("dcim", state.enabled_scopes)

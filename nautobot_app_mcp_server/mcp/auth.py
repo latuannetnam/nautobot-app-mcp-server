@@ -62,7 +62,7 @@ def get_user_from_request(ctx: ToolContext):  # noqa: ANN201
         return AnonymousUser()
 
     # Look up the Nautobot API token
-    real_token_key = token_key[len(TOKEN_PREFIX):]
+    real_token_key = token_key[len(TOKEN_PREFIX) :]
 
     try:
         from nautobot.users.models import Token

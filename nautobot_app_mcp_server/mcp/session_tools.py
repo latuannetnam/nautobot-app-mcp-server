@@ -257,10 +257,7 @@ def mcp_disable_tools(mcp: FastMCP) -> None:
             return "Disabled all non-core tools."
 
         # Find all scopes that start with this prefix (children included)
-        to_remove = {
-            s for s in state.enabled_scopes
-            if s == scope or s.startswith(f"{scope}.")
-        }
+        to_remove = {s for s in state.enabled_scopes if s == scope or s.startswith(f"{scope}.")}
         state.enabled_scopes -= to_remove
         state.apply_to_session(session)
         return f"Disabled scope '{scope}' and {len(to_remove)} child scope(s)."
@@ -276,8 +273,7 @@ def mcp_disable_tools(mcp: FastMCP) -> None:
                 "scope": {
                     "type": "string",
                     "description": (
-                        "Dot-separated scope to disable (e.g. 'dcim'). "
-                        "None disables all non-core tools."
+                        "Dot-separated scope to disable (e.g. 'dcim'). " "None disables all non-core tools."
                     ),
                 },
             },
