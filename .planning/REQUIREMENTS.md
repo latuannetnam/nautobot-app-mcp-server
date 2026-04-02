@@ -70,9 +70,9 @@
 
 ### SKILL.md Package
 
-- [ ] **SKILL-01**: `nautobot-mcp-skill/` pip package with SKILL.md
-- [ ] **SKILL-02**: SKILL.md with Core Tools reference table, scope management patterns, pagination docs
-- [ ] **SKILL-03**: SKILL.md with investigation workflows (investigate device, find by name, explore Juniper BGP)
+- [x] **SKILL-01**: `nautobot-mcp-skill/` pip package with SKILL.md
+- [x] **SKILL-02**: SKILL.md with Core Tools reference table, scope management patterns, pagination docs
+- [x] **SKILL-03**: SKILL.md with investigation workflows (investigate device, find by name, explore Juniper BGP)
 
 ### Testing
 
@@ -142,9 +142,9 @@
 | PAGE-03 | Phase 3 | Pending |
 | PAGE-04 | Phase 3 | Pending |
 | PAGE-05 | Phase 3 | Complete |
-| SKILL-01 | Phase 4 | Pending |
-| SKILL-02 | Phase 4 | Pending |
-| SKILL-03 | Phase 4 | Pending |
+| SKILL-01 | Phase 4 | Complete |
+| SKILL-02 | Phase 4 | Complete |
+| SKILL-03 | Phase 4 | Complete |
 | TEST-01 | Phase 1 | Pending |
 | TEST-02 | Phase 3 | Pending |
 | TEST-03 | Phase 1 | Pending |
