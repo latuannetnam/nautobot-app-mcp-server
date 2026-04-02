@@ -131,8 +131,8 @@ class TestDeviceList(TestCase):
 
         # Verify restrict called with user + "view" action (AUTH-03)
         mock_qs.restrict.assert_called_once()
-        args, kwargs = mock_qs.restrict.call_args
-        self.assertEqual(args[1], "view")  # second positional = action
+        kwargs = mock_qs.restrict.call_args[1]
+        self.assertEqual(kwargs.get("action"), "view")
 
 
 class TestDeviceGet(TestCase):
@@ -158,17 +158,18 @@ class TestDeviceGet(TestCase):
         return device
 
     @patch("nautobot_app_mcp_server.mcp.tools.query_utils.build_device_qs")
-    def test_device_get_by_name(self, mock_build_qs):
+    @patch("nautobot_app_mcp_server.mcp.tools.query_utils.serialize_device_with_interfaces")
+    def test_device_get_by_name(self, mock_serialize, mock_build_qs):
         from nautobot_app_mcp_server.mcp.tools.query_utils import _sync_device_get
 
-        mock_device = self._make_mock_device()
         mock_qs = MagicMock()
         mock_build_qs.return_value = mock_qs
         mock_qs.filter.return_value = mock_qs
         mock_qs.prefetch_related.return_value = mock_qs
         mock_qs.restrict.return_value = mock_qs
-        mock_qs.__iter__ = lambda self: iter([mock_device])
+        mock_qs.__iter__ = lambda self: iter([MagicMock()])
 
+        mock_serialize.return_value = {"name": "router-01", "pk": "abc-123"}
         mock_user = MagicMock()
         result = _sync_device_get(user=mock_user, name_or_id="router-01")
 
@@ -250,17 +251,18 @@ class TestInterfaceGet(TestCase):
         return interface
 
     @patch("nautobot_app_mcp_server.mcp.tools.query_utils.build_interface_qs_with_ip_addresses")
-    def test_interface_get_returns_ip_addresses(self, mock_build_qs):
+    @patch("nautobot_app_mcp_server.mcp.tools.query_utils.serialize_interface")
+    def test_interface_get_returns_ip_addresses(self, mock_serialize, mock_build_qs):
         from nautobot_app_mcp_server.mcp.tools.query_utils import _sync_interface_get
 
-        mock_interface = self._make_mock_interface()
         mock_qs = MagicMock()
         mock_build_qs.return_value = mock_qs
         mock_qs.filter.return_value = mock_qs
         mock_qs.prefetch_related.return_value = mock_qs
         mock_qs.restrict.return_value = mock_qs
-        mock_qs.__iter__ = lambda self: iter([mock_interface])
+        mock_qs.__iter__ = lambda self: iter([MagicMock()])
 
+        mock_serialize.return_value = {"name": "ge-0/0/0", "ip_addresses": []}
         mock_user = MagicMock()
         result = _sync_interface_get(user=mock_user, name_or_id="ge-0/0/0")
 
@@ -441,8 +443,9 @@ class TestAuthEnforcement(TestCase):
         _sync_device_list(user=mock_user, limit=25, cursor=None)
 
         mock_qs.restrict.assert_called_once()
-        args = mock_qs.restrict.call_args[0]
-        self.assertEqual(args[1], "view")
+        # restrict(user, action="view") passes action as keyword arg
+        kwargs = mock_qs.restrict.call_args[1]
+        self.assertEqual(kwargs.get("action"), "view")
 
     @patch("nautobot_app_mcp_server.mcp.tools.query_utils.build_interface_qs_with_ip_addresses")
     def test_interface_get_calls_restrict(self, mock_build_qs):
@@ -541,7 +544,11 @@ class TestPaginationIntegration(TestCase):
         pk = uuid.uuid4()
         mock_item = MagicMock(pk=pk)
         mock_qs = MagicMock()
-        mock_qs.__getitem__ = lambda self, key: [mock_item] if key == slice(0, 2) else [mock_item]
+        # Simulate 2 items when slicing with [:2] (limit=1 → limit+1=2),
+        # confirming there is a next page
+        mock_qs.__getitem__ = lambda self, key: (
+            [mock_item, mock_item] if key == slice(0, 2) else [mock_item]
+        )
         mock_qs.count.return_value = 1
 
         result = paginate_queryset(mock_qs, limit=1, cursor=None)

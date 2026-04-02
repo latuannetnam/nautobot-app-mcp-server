@@ -463,6 +463,7 @@ def _sync_search_by_name(
     Raises:
         ValueError: If query is empty or whitespace-only.
     """
+    import functools
     import operator as op
 
     from django.db.models import Q
@@ -470,7 +471,6 @@ def _sync_search_by_name(
     from nautobot_app_mcp_server.mcp.tools.pagination import (
         decode_cursor,
         encode_cursor,
-        paginate_queryset,
     )
 
     # Strip and split query (D-01: handle leading/trailing whitespace)
@@ -494,7 +494,7 @@ def _sync_search_by_name(
 
     # Search Device
     qs_device = build_device_qs().restrict(user, action="view").filter(
-        op.and_(*[_name_contains("name", t) for t in terms])
+        functools.reduce(op.and_, [_name_contains("name", t) for t in terms])
     )
     for device in qs_device:
         all_results.append({
@@ -506,7 +506,7 @@ def _sync_search_by_name(
 
     # Search Interface
     qs_interface = build_interface_qs().restrict(user, action="view").filter(
-        op.and_(*[_name_contains("name", t) for t in terms])
+        functools.reduce(op.and_, [_name_contains("name", t) for t in terms])
     )
     for interface in qs_interface:
         all_results.append({
@@ -518,7 +518,7 @@ def _sync_search_by_name(
 
     # Search IPAddress (search address field)
     qs_ip = build_ipaddress_qs().restrict(user, action="view").filter(
-        op.and_(*[_address_contains(t) for t in terms])
+        functools.reduce(op.and_, [_address_contains(t) for t in terms])
     )
     for ip in qs_ip:
         all_results.append({
@@ -530,7 +530,7 @@ def _sync_search_by_name(
 
     # Search Prefix (search prefix field — network portion)
     qs_prefix = build_prefix_qs().restrict(user, action="view").filter(
-        op.and_(*[_prefix_contains(t) for t in terms])
+        functools.reduce(op.and_, [_prefix_contains(t) for t in terms])
     )
     for prefix in qs_prefix:
         all_results.append({
@@ -542,7 +542,7 @@ def _sync_search_by_name(
 
     # Search VLAN
     qs_vlan = build_vlan_qs().restrict(user, action="view").filter(
-        op.and_(*[_name_contains("name", t) for t in terms])
+        functools.reduce(op.and_, [_name_contains("name", t) for t in terms])
     )
     for vlan in qs_vlan:
         all_results.append({
@@ -554,7 +554,7 @@ def _sync_search_by_name(
 
     # Search Location
     qs_location = build_location_qs().restrict(user, action="view").filter(
-        op.and_(*[_name_contains("name", t) for t in terms])
+        functools.reduce(op.and_, [_name_contains("name", t) for t in terms])
     )
     for location in qs_location:
         all_results.append({
