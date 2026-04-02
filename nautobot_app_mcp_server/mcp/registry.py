@@ -77,9 +77,9 @@ class MCPToolRegistry:
         if scope == "core":
             return self.get_core_tools()
         return [
-            t for t in self._tools.values()
-            if t.scope == scope
-            or (t.scope is not None and t.scope.startswith(f"{scope}."))
+            t
+            for t in self._tools.values()
+            if t.scope == scope or (t.scope is not None and t.scope.startswith(f"{scope}."))
         ]
 
     def fuzzy_search(self, term: str) -> list[ToolDefinition]:
@@ -92,7 +92,4 @@ class MCPToolRegistry:
             All tools whose name or description contains the term.
         """
         term_lower = term.lower()
-        return [
-            t for t in self._tools.values()
-            if term_lower in t.name.lower() or term_lower in t.description.lower()
-        ]
+        return [t for t in self._tools.values() if term_lower in t.name.lower() or term_lower in t.description.lower()]
