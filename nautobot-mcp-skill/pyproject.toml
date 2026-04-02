@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nautobot-mcp-skill"
+version = "0.1.0a0"
+description = "SKILL.md for nautobot-app-mcp-server — AI agent capability reference"
+readme = "SKILL.md"
+license = {text = "Apache-2.0"}
+authors = [{name = "Le Anh Tuan", email = "latuannetnam@gmail.com"}]
+requires-python = ">=3.10"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "nautobot_mcp_skill.__version__"}
