@@ -65,14 +65,6 @@ The dev environment uses **Docker Compose** defined in `development/`.
    ```
    Nautobot will be available at http://localhost:8080
 
-3. Other useful invoke tasks:
-   ```bash
-   poetry run invoke makemigrations   # generate migrations
-   poetry run invoke createsuperuser   # create admin user
-   poetry run invoke ruff --fix        # auto-fix lint issues
-   poetry run invoke coverage          # run tests with coverage
-   ```
-
 ---
 
 ## Testing Workflow
@@ -147,17 +139,12 @@ docker exec nautobot-app-mcp-server-nautobot-1 pip show fastmcp
 | `VIRTUAL_ENV=/usr` errors | WSL inherited env var | Always `unset VIRTUAL_ENV` before Poetry commands |
 | Tests pass but `invoke tests` fails | `ruff format` or lint issues | Run `ruff format` in container: `cd /source && ruff format .` |
 
-### Run Tests from Host Without Shelling In
+### Run Tests from Host (No Shell Needed)
 
 ```bash
-# Entire pipeline: linters + unit tests
-unset VIRTUAL_ENV && poetry run invoke tests
-
-# Just unit tests
-unset VIRTUAL_ENV && poetry run invoke unittest
-
-# With coverage
-unset VIRTUAL_ENV && poetry run invoke unittest --coverage
+unset VIRTUAL_ENV && poetry run invoke unittest              # unit tests only
+unset VIRTUAL_ENV && poetry run invoke unittest --coverage  # with coverage
+unset VIRTUAL_ENV && poetry run invoke tests                # full CI pipeline (linters + tests)
 ```
 
 ---
@@ -169,7 +156,7 @@ unset VIRTUAL_ENV && poetry run invoke unittest --coverage
 | Ruff | `poetry run invoke ruff` | PEP 8, isort, flake8, bandit |
 | Pylint | `poetry run invoke pylint` | Django-aware via pylint-nautobot |
 | yamllint | `poetry run invoke yamllint` | YAML linting |
-| djlint | `poetry run invoke lint` | Django template linting |
+| djlint | `poetry run invoke djlint` | Django template linting |
 | mkdocs | `poetry run invoke mkdocs` | Build docs at `nautobot_app_mcp_server/static/nautobot_app_mcp_server/docs/` |
 
 > **Pylint score must remain 10.00/10.** Any PR that drops the score must fix the issues before merging.
@@ -257,7 +244,7 @@ poetry run pre-commit run --all-files
 - Branch naming: `feature/...`, `fix/...`, `docs/...`
 - Commits follow conventional format: `type: description`
 - Run all tests (`poetry run invoke tests`) before pushing
-- Run `poetry run invoke lint` before opening PR
+- Run linters individually: `poetry run invoke ruff`, `poetry run invoke pylint`, `poetry run invoke yamllint`
 
 ---
 
@@ -312,11 +299,11 @@ A Nautobot App that embeds a Model Context Protocol (MCP) server inside Nautobot
 | **Tested / Dev runtime** | Python 3.12 | `tasks.py` line 57 |
 | **WSL VENV** | `/usr` (system site-packages) | CLAUDE.md |
 ## Package Manager
-# development/Dockerfile lines 29–31
-# Install deps after lockfile changes
-# Run any command inside the venv
-# Shell (activates venv, clears WSL VIRTUAL_ENV)
+
+Poetry is used inside the Docker container. Commands run via `poetry run <command>` from the `/source` directory. The virtualenv is created at `.venv/` in the project root.
 ## Core Dependency: Nautobot
+
+Requires Nautobot >=3.0.0, <4.0.0. See `pyproject.toml` line 33.
 ## Dev Dependencies
 | Package | Purpose |
 |---|---|
@@ -351,7 +338,8 @@ A Nautobot App that embeds a Model Context Protocol (MCP) server inside Nautobot
 | `mkdocs-glightbox = 0.5.2` | Image lightbox in docs |
 ## Docker / Dev Environment
 ### Base Image
-# development/Dockerfile line 16
+
+`ghcr.io/nautobot/nautobot-dev:${NAUTOBOT_VER}-py${PYTHON_VER}` — the official Nautobot development Docker image, which includes most CI dependencies. Configured via `NAUTOBOT_VER` and `PYTHON_VER` in `development/.env`.
 ### Services (Docker Compose)
 | Service | Image | Notes |
 |---|---|---|
@@ -367,16 +355,17 @@ A Nautobot App that embeds a Model Context Protocol (MCP) server inside Nautobot
 | `development/creds.env` | Secrets (passwords, secret keys, API tokens) — gitignored |
 | `development/creds.example.env` | Template for `creds.env` |
 ## Configuration (nautobot_config.py)
-# Database (PostgreSQL default; MySQL via NAUTOBOT_DB_ENGINE)
+
+Database: PostgreSQL by default; MySQL via `NAUTOBOT_DB_ENGINE`. See `development/nautobot_config.py` for the full configuration.
 ## Code Quality Tools
 | Tool | Config location | Command |
 |---|---|---|
 | **Ruff** 0.5.5 | `pyproject.toml` `[tool.ruff]` | `invoke ruff [--fix]` |
 | **Pylint** | `pyproject.toml` `[tool.pylint.master]` | `invoke pylint` |
 | **yamllint** | `tasks.py` `yamllint` task | `invoke yamllint` |
-| **djlint** | `pyproject.toml` `[tool.djlint]` | `invoke lint` (also runs djhtml) |
+| **djlint** | `pyproject.toml` `[tool.djlint]` | `invoke djlint` (also runs djhtml) |
 | **markdownlint** | `pyproject.toml` `[tool.pymarkdown]` | `invoke markdownlint [--fix]` |
-| **Coverage** | `pyproject.toml` `[tool.coverage.run]` | `invoke coverage` |
+| **Coverage** | `pyproject.toml` `[tool.coverage.run]` | `invoke unittest --coverage` |
 | **Towncrier** | `pyproject.toml` `[tool.towncrier]` | `invoke generate-release-notes` |
 ## Changelog / Release Management
 - `changes/added/`, `changes/changed/`, `changes/fixed/`, `changes/removed/`, `changes/breaking/`, `changes/deprecated/`, `changes/security/`, `changes/documentation/`, `changes/dependencies/`, `changes/housekeeping/`
@@ -395,7 +384,6 @@ A Nautobot App that embeds a Model Context Protocol (MCP) server inside Nautobot
 | `invoke unittest [--coverage]` | `nautobot-server test` | Run tests |
 | `invoke generate-release-notes` | `towncrier build` | Build changelog |
 | `invoke validate-app-config` | `nbshell` with app schema | Validate `PLUGINS_CONFIG` schema |
-## Static Files / Packaging
 <!-- GSD:stack-end -->
 
 <!-- GSD:conventions-start source:CONVENTIONS.md -->
@@ -417,7 +405,6 @@ A Nautobot App that embeds a Model Context Protocol (MCP) server inside Nautobot
 | **djhtml** | Django template auto-formatting | CLI invocation in `tasks.py` |
 | **pymarkdownlnt** | Markdown linting | `pyproject.toml [tool.pymarkdown]` |
 | **Towncrier** | Changelog / release notes | `pyproject.toml [tool.towncrier]` |
-### Running the Full Lint Suite
 ## Ruff
 ### What Ruff checks
 | Rule prefix | What it catches |
@@ -432,14 +419,12 @@ A Nautobot App that embeds a Model Context Protocol (MCP) server inside Nautobot
 - **D401 (imperative mood first line) is ignored** — the team does not require this style.
 - **D documents not required** for migrations or test files (`per-file-ignores`).
 - **`--fix`** is safe to run in CI or locally; ruff will auto-fix everything it can.
-### Formatting with Ruff
 ## Pylint
 ### Notable Pylint settings
 - **`no-docstring-rgx`**: `_`-prefixed methods, `test_`-prefixed functions, and `Meta` inner classes are exempt from docstring requirements. This aligns with the `ruff` `D` rule exemptions.
 - **TODO comments**: `FIXME` and `XXX` are permitted and do not fail the build.
 - **Disabled checks**: `line-too-long` (handled by Ruff), `too-many-positional-arguments` (Django signals often require many args), and three Nautobot-specific `nb-*` codes.
 - **Django-aware**: `pylint_django` and `pylint_nautobot` plugins suppress false positives from Django ORM patterns.
-### Running Pylint
 ### Migrations Pylint (if migrations exist)
 - `fatal` — new model fields without defaults
 - `new-db-field-with-default` — missing callable defaults
@@ -462,17 +447,10 @@ A Nautobot App that embeds a Model Context Protocol (MCP) server inside Nautobot
 | Package name | `snake_case` | `nautobot_app_mcp_server` |
 | App `name` in config | `snake_case` | `"nautobot_app_mcp_server"` |
 | App `base_url` | `kebab-case` or `slug` | `"mcp-server"` |
-### `NautobotAppConfig` fields
-## Imports & Ordering
-## Error Handling
-### Raising errors in `tasks.py`
-### Raising errors in app code
-### `warn=True` in invoke task runners
 ## Type Hints
 - Use `from __future__ import annotations` (PEP 563) to avoid forward-reference string quotes.
 - Use `# type: ignore` comments for third-party stubs that don't type cleanly (seen in `development/app_config_schema.py`).
 - Pylint `init-hook` loads Nautobot before scanning so type inference works across the codebase.
-## Logging
 ## Django App Structure (No Models)
 - `nautobot_app_mcp_server/__init__.py` — `NautobotAppMcpServerConfig`
 - `nautobot_app_mcp_server/tests/__init__.py` — test package marker
@@ -497,7 +475,7 @@ A Nautobot App that embeds a Model Context Protocol (MCP) server inside Nautobot
 - **Branches**: `feature/...`, `fix/...`, `docs/...`
 - **Commits**: conventional format — `type: description`
 - **Before pushing**: run `poetry run invoke tests`
-- **Before opening PR**: run `poetry run invoke lint` (includes ruff, djlint, yamllint, markdownlint, pylint, mkdocs)
+- **Before opening PR**: run `poetry run invoke ruff`, `poetry run invoke pylint`, `poetry run invoke yamllint`
 - **PRs must not break existing tests** or reduce coverage.
 ## Docker / Development Environment
 - **Python package manager**: Poetry exclusively. **Never use `pip`** directly.
@@ -517,78 +495,85 @@ A Nautobot App that embeds a Model Context Protocol (MCP) server inside Nautobot
 ## Architecture
 
 ## 1. What This App Actually Is
-```
-```
+
+This app is a **protocol adapter**, not a data model app. It embeds a FastMCP server inside Nautobot's Django process, exposing Nautobot's data via the Model Context Protocol (MCP). No database models are created.
+
 ## 2. Design Pattern: Embedded Protocol Adapter
+
 | Approach | Pros | Cons |
 |---|---|---|
 | External MCP server calling REST API | Simpler deployment | Extra network hop, no direct ORM access |
 | **Embedded in Django process (this app)** | Direct ORM, permissions integration, no extra port | Couples MCP lifecycle to Django |
 | Option B: Separate gunicorn worker on port 9001 | Simpler deployment, separate process | Requires separate startup, different URL |
-```python
-```
+
 ## 3. Layer-by-Layer Data Flow
+
 ### Layer 1 — Entry Point (Django → MCP)
-```
-```
+
+Nautobot URL routing → `mcp_view` (ASGI bridge) → FastMCP ASGI app:
+
 ```python
+# nautobot_app_mcp_server/mcp/view.py
+def mcp_view(request):
+    app = get_mcp_app()       # Lazy: built on first request (PIT-03)
+    handler = WsgiToAsgi(app) # Django WSGI → ASGI conversion
+    return handler(request)
 ```
+
 ### Layer 2 — Authentication
-```
-```
+
+The MCP HTTP endpoint is unauthenticated at the MCP layer. Nautobot's session cookie authenticates the Django request. `get_user_from_request()` extracts the Nautobot user from the Django request, and permission enforcement happens in each tool's ORM query.
+
 ### Layer 3 — Tool Registry (In-Memory Singleton)
-```
-```
-```python
-```
-```
-```
+
+`MCPToolRegistry` is a thread-safe singleton that holds all `ToolDefinition` objects. It uses `threading.Lock` for safe concurrent access. Registration happens via `register_mcp_tool()` calls that run during `post_migrate` signals.
+
 ### Layer 4 — Tool Registration Lifecycle
-```
-```
-```python
-```
-```python
-```
+
+Session tools (`mcp_enable_tools`, `mcp_disable_tools`, `mcp_list_tools`) are registered unconditionally at module import time in `session_tools.py`. App-tier tools from third-party Nautobot apps are registered via their own `post_migrate` signal handlers. The `_on_post_migrate()` guard ensures only the owning app's tools are loaded.
+
 ### Layer 5 — Third-Party Tool Registration API
-```python
-```
+
+Apps can register tools using `register_mcp_tool()` from their own `post_migrate` signal handlers. Tools declare `tier` ("core" or "app") and a `scope` for progressive disclosure.
+
 ### Layer 6 — Tool Executor (Sync → Async Bridge)
-```python
-```
-### Layer 7 — Pagination and Summarization
-```python
-```
-```python
-```
+
+FastMCP is fully async, but Nautobot ORM queries are sync. The app uses `async_to_sync` from `asgiref` to run ORM queries in the Django sync context within async tool handlers.
+
+### Layer 7 — Pagination and Summarization (Planned)
+
+Tool results that return large querysets will use cursor-based pagination. A `PaginatedResult` dataclass will wrap the cursor page and an optional LLM-generated summary to keep response sizes manageable.
+
 ### Layer 8 — Session State (Per-Conversation Scoping)
-```python
-```
-```python
-```
+
+Session state (enabled scopes, active searches) is stored in FastMCP's per-session dict (`session["enabled_scopes"]`, `session["enabled_searches"]`). The `_list_tools_handler()` reads session state and filters which tools are visible (progressive disclosure).
+
 ## 4. Key Abstractions
 | Abstraction | File | Purpose |
 |---|---|---|
 | `NautobotAppMcpServerConfig` | `nautobot_app_mcp_server/__init__.py` | Nautobot plugin entry point |
 | `MCPToolRegistry` | `nautobot_app_mcp_server/mcp/registry.py` | Thread-safe in-memory tool registry singleton |
 | `ToolDefinition` | `nautobot_app_mcp_server/mcp/registry.py` | Dataclass describing one tool |
-| `MCPSessionState` | `nautobot_app_mcp_server/mcp/session.py` | Per-conversation enabled-scopes/searches state |
-| `PaginatedResult` | `nautobot_app_mcp_server/mcp/tools/pagination.py` | Cursor page + optional summary |
+| `MCPSessionState` | `nautobot_app_mcp_server/mcp/session_tools.py` | Per-conversation enabled-scopes/searches state |
 | `register_mcp_tool()` | `nautobot_app_mcp_server/mcp/__init__.py` | Public API for third-party apps |
 | `get_user_from_request()` | `nautobot_app_mcp_server/mcp/auth.py` | Extract Nautobot user from request auth |
 ## 5. Entry Points
 ### Django Plugin Entry
-```
-```
+
+`NautobotAppMcpServerConfig` in `__init__.py` registers the plugin and connects the `post_migrate` signal to initialize the tool registry after app startup.
+
 ### MCP HTTP Request Entry
-```
-```
+
+`mcp_view` in `view.py` bridges Django HTTP → FastMCP ASGI → MCP protocol handler. The FastMCP app is lazily built on first request to avoid Django ORM race conditions at startup.
+
 ### CLI / Development Entry
-```
-```
+
+Use `poetry run invoke cli` to shell into the running Nautobot container. Inside the container, `cd /source` is the project root.
+
 ## 6. Permissions Model
-```
-```
+
+Tools use Nautobot's ORM queryset permissions (`get_for_user(request.user)`). Each tool filters its queryset by the authenticated Nautobot user, inheriting Nautobot's standard object-level permissions.
+
 ## 7. Out of Scope for V1
 | Feature | Reason |
 |---|---|
