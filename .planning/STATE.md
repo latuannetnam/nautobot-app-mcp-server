@@ -10,19 +10,19 @@ progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 5
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-02 (Phase 3 Plans 01+02 executed — pagination + 10 core tools complete)
+**Last updated:** 2026-04-02 (Phase 3 Plans 01+02+03 executed — pagination + 10 core tools + search_by_name + tests complete)
 **Roadmap:** `.planning/ROADMAP.md`
 
 ---
 
 ## Current Phase
 
-**Phase 3 — Core Read Tools** (In Progress — Plan 03 pending)
+**Phase 3 — Core Read Tools** (In Progress — Plans 04+05 pending)
 
 ---
 
@@ -47,9 +47,9 @@ progress:
 | Phase 0 | Project Setup | 4 | 0 | 0 | 4 |
 | Phase 1 | MCP Server Infrastructure | 14 | **14** | 0 | 0 |
 | Phase 2 | Authentication & Sessions | 10 | **10** | 0 | 0 |
-| Phase 3 | Core Read Tools | 15 | **10** | 0 | 5 |
+| Phase 3 | Core Read Tools | 15 | **12** | 0 | 3 |
 | Phase 4 | SKILL.md Package | 3 | 0 | 0 | 3 |
-| **Total** | | **47** | **34** | **0** | **13** |
+| **Total** | | **47** | **36** | **0** | **11** |
 
 ---
 
@@ -120,6 +120,15 @@ progress:
 | `__init__.py` triggers `core` import | `from nautobot_app_mcp_server.mcp.tools import core` | Ensures all `register_mcp_tool()` calls fire on package load |
 | `paginate_queryset_async` in `__all__` | Added despite plan omission | Public API needed for tests and future tools |
 
+### Phase 3 Plan 03 — Decisions Made During Execution
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| AND filter with `functools.reduce` | `functools.reduce(op.and_, [Q(...) for t in terms])` | `op.and_()` requires exactly 2 positional args; `reduce` handles any list length |
+| search_by_name cursor | Manual pagination over combined list; cursor = `base64(f"{model}.{pk}")` | No DB cursor across models; manual offset over sorted list |
+| Test serializer patching | Patch `serialize_device_with_interfaces` and `serialize_interface` | `model_to_dict()` fails with chained MagicMock attributes (MagicMock != str) |
+| `restrict()` action assertion | `kwargs.get("action")` not positional args | Django ORM passes `action` as keyword arg, not positional |
+
 ## Open Questions
 
 | Question | Impact | Priority |
@@ -138,6 +147,7 @@ progress:
 | 0.1.0-dev | 2026-04-01 | Phase 1 executed | All 11 tasks complete; commit 13ca60e |
 | 0.1.0-dev | 2026-04-01 | Phase 2 executed | All 6 tasks complete; 7 commits (c8469cb→750878f) |
 | 0.1.0-dev | 2026-04-02 | Phase 3 Plans 01+02 executed | Pagination + 10 core read tools; commits (e861e2b→033728b) |
+| 0.1.0-dev | 2026-04-02 | Phase 3 Plan 03 executed | search_by_name + test_core_tools.py (31 tests); commits (84f9c03→9948527) |
 
 ---
 

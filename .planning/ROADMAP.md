@@ -277,22 +277,24 @@ nautobot-mcp-skill/
 
 | Req ID | Requirement | Status |
 |---|---|---|
-| TOOL-01 | `device_list` | Pending |
-| TOOL-02 | `device_get` | Pending |
-| TOOL-03 | `interface_list` | Pending |
-| TOOL-04 | `interface_get` | Pending |
-| TOOL-05 | `ipaddress_list` | Pending |
-| TOOL-06 | `ipaddress_get` | Pending |
-| TOOL-07 | `prefix_list` | Pending |
-| TOOL-08 | `vlan_list` | Pending |
-| TOOL-09 | `location_list` | Pending |
-| TOOL-10 | `search_by_name` | Pending |
-| PAGE-01 | `paginate_queryset(qs, limit, cursor)` with `LIMIT_DEFAULT=25`, `LIMIT_MAX=1000` | Pending |
-| PAGE-02 | `LIMIT_SUMMARIZE=100` — count BEFORE slicing, auto-summarize | Pending |
-| PAGE-03 | `PaginatedResult` dataclass | Pending |
-| PAGE-04 | Cursor encoding as `base64(str(pk))` | Pending |
-| PAGE-05 | `sync_to_async(fn, thread_sensitive=True)` for all ORM calls | Pending |
-| TEST-02 | `test_core_tools.py` — ORM mocking, pagination, auth | Pending |
+| TOOL-01 | `device_list` | **Completed** |
+| TOOL-02 | `device_get` | **Completed** |
+| TOOL-03 | `interface_list` | **Completed** |
+| TOOL-04 | `interface_get` | **Completed** |
+| TOOL-05 | `ipaddress_list` | **Completed** |
+| TOOL-06 | `ipaddress_get` | **Completed** |
+| TOOL-07 | `prefix_list` | **Completed** |
+| TOOL-08 | `vlan_list` | **Completed** |
+| TOOL-09 | `location_list` | **Completed** |
+| TOOL-10 | `search_by_name` | **Completed** |
+| PAGE-01 | `paginate_queryset(qs, limit, cursor)` with `LIMIT_DEFAULT=25`, `LIMIT_MAX=1000` | **Completed** |
+| PAGE-02 | `LIMIT_SUMMARIZE=100` — count BEFORE slicing, auto-summarize | **Completed** |
+| PAGE-03 | `PaginatedResult` dataclass | **Completed** |
+| PAGE-04 | Cursor encoding as `base64(str(pk))` | **Completed** |
+| PAGE-05 | `sync_to_async(fn, thread_sensitive=True)` for all ORM calls | **Completed** |
+| TEST-02 | `test_core_tools.py` — ORM mocking, pagination, auth | **Completed** |
+
+**Executed:** 2026-04-02 (Plans 01+02+03), commits (e861e2b→033728b→84f9c03→f18ff4c→c8a71ec→9948527)
 
 ### Phase 4 — SKILL.md Package
 
