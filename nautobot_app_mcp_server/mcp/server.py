@@ -7,7 +7,7 @@ avoids Django startup race conditions where the ORM is not yet ready.
 Architecture:
     Django request → urls.py → mcp_view (view.py)
                               → get_mcp_app() [lazy]
-                              → mcp.streamable_http_app() [ASGI app]
+                              → mcp.http_app() [ASGI app]
                               → FastMCP handles MCP protocol
 """
 
@@ -18,9 +18,10 @@ from typing import TYPE_CHECKING
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
-    from mcp.server import Context as ToolContext
-    from mcp.server import ToolInstance
     from starlette.applications import Starlette
+
+from mcp.server import Context as ToolContext
+from mcp.server import ToolInstance
 
 # Module-level globals — NOT initialized at import time (PIT-03)
 _mcp_app: Starlette | None = None
@@ -40,10 +41,7 @@ def _setup_mcp_app() -> FastMCP:
         mcp_list_tools,
     )
 
-    mcp = FastMCP(
-        "NautobotMCP",
-        json_response=True,
-    )
+    mcp = FastMCP("NautobotMCP")
 
     # Register session tools as MCP tools (decorators capture `mcp`)
     mcp_enable_tools(mcp)
@@ -76,7 +74,7 @@ def get_mcp_app() -> Starlette:
         mcp_instance = _setup_mcp_app()
         _mcp_app = mcp_instance.http_app(
             path="/mcp",
-            transport="streamable-http",
+            transport="streamable http",
             stateless_http=False,
             json_response=True,
         )

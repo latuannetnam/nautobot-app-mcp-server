@@ -30,8 +30,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
-    from mcp.server import Context as ToolContext
-    from mcp.server import ToolInstance
+
+from mcp.server import Context as ToolContext
+from mcp.server import ToolInstance
 
 from nautobot_app_mcp_server.mcp import register_mcp_tool
 

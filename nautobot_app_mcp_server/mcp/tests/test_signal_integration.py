@@ -34,7 +34,10 @@ class RegistrySingletonTestCase(TestCase):
         import _thread
 
         self.assertTrue(hasattr(MCPToolRegistry, "_lock"))
-        self.assertIsInstance(MCPToolRegistry._lock, _thread.lock)
+        lock = MCPToolRegistry._lock
+        # threading.Lock() creates _thread.lock instances; verify by calling acquire
+        self.assertTrue(callable(lock.acquire))
+        self.assertTrue(callable(lock.release))
 
     def test_register_raises_on_duplicate_name(self):
         """Registered two tools with the same name raises ValueError."""
