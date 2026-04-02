@@ -131,8 +131,7 @@ def paginate_queryset(
                 "total_count": total_count,
                 "display_count": len(items),
                 "message": (
-                    f"Showing {len(items)} of {total_count} results. "
-                    "Refine your search to see specific records."
+                    f"Showing {len(items)} of {total_count} results. " "Refine your search to see specific records."
                 ),
             }
 
@@ -167,6 +166,4 @@ async def paginate_queryset_async(
     Returns:
         PaginatedResult (same as paginate_queryset).
     """
-    return await sync_to_async(paginate_queryset, thread_sensitive=True)(
-        qs=qs, limit=limit, cursor=cursor
-    )
+    return await sync_to_async(paginate_queryset, thread_sensitive=True)(qs=qs, limit=limit, cursor=cursor)

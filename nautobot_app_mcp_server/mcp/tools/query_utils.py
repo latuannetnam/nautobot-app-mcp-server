@@ -39,8 +39,13 @@ def serialize_device(device: Device) -> dict[str, Any]:
     data = model_to_dict(
         device,
         fields=[
-            "pk", "name", "serial", "asset_tag", "description",
-            "primary_ip4", "primary_ip6",
+            "pk",
+            "name",
+            "serial",
+            "asset_tag",
+            "description",
+            "primary_ip4",
+            "primary_ip6",
         ],
         exclude=_STANDARD_EXCLUDE,
     )
@@ -50,9 +55,7 @@ def serialize_device(device: Device) -> dict[str, Any]:
     data["platform"] = device.platform.name if device.platform else None
     data["device_type"] = device.device_type.display_name if device.device_type else None
     data["manufacturer"] = (
-        device.device_type.manufacturer.name
-        if device.device_type and device.device_type.manufacturer
-        else None
+        device.device_type.manufacturer.name if device.device_type and device.device_type.manufacturer else None
     )
     data["location"] = device.location.name if device.location else None
     data["tenant"] = device.tenant.name if device.tenant else None
@@ -75,9 +78,19 @@ def serialize_interface(interface: Interface) -> dict[str, Any]:
     data = model_to_dict(
         interface,
         fields=[
-            "pk", "name", "label", "enabled", "type", "mtu",
-            "mac_address", "mode", "description", "mgmt_only",
-            "speed", "duplex", "wwn",
+            "pk",
+            "name",
+            "label",
+            "enabled",
+            "type",
+            "mtu",
+            "mac_address",
+            "mode",
+            "description",
+            "mgmt_only",
+            "speed",
+            "duplex",
+            "wwn",
         ],
         exclude=_STANDARD_EXCLUDE,
     )
@@ -88,23 +101,13 @@ def serialize_interface(interface: Interface) -> dict[str, Any]:
     data["lag"] = interface.lag.name if interface.lag else None
     data["parent"] = interface.parent.name if interface.parent else None
     data["bridge"] = interface.bridge.name if interface.bridge else None
-    data["virtual_device_context"] = (
-        interface.virtual_device_context.name if interface.virtual_device_context else None
-    )
-    data["untagged_vlan"] = (
-        interface.untagged_vlan.name if interface.untagged_vlan else None
-    )
+    data["virtual_device_context"] = interface.virtual_device_context.name if interface.virtual_device_context else None
+    data["untagged_vlan"] = interface.untagged_vlan.name if interface.untagged_vlan else None
     # Serialize IP addresses inline (prefetched on interface_get)
     if hasattr(interface, "_prefetched_objects_cache") and "ip_addresses" in interface._prefetched_objects_cache:  # noqa: E501
-        data["ip_addresses"] = [
-            {"pk": str(ip.pk), "address": ip.address}
-            for ip in interface.ip_addresses.all()
-        ]
+        data["ip_addresses"] = [{"pk": str(ip.pk), "address": ip.address} for ip in interface.ip_addresses.all()]
     else:
-        data["ip_addresses"] = [
-            {"pk": str(ip.pk), "address": ip.address}
-            for ip in interface.ip_addresses.all()
-        ]
+        data["ip_addresses"] = [{"pk": str(ip.pk), "address": ip.address} for ip in interface.ip_addresses.all()]
     return data
 
 
@@ -340,17 +343,9 @@ def _sync_interface_list(user: User, device_name: str | None, limit: int, cursor
 def _sync_interface_get(user: User, name_or_id: str) -> dict[str, Any]:
     """Sync implementation of interface_get (D-02 + D-03)."""
     if _looks_like_uuid(name_or_id):
-        qs = (
-            build_interface_qs_with_ip_addresses()
-            .filter(pk=name_or_id)
-            .restrict(user, action="view")
-        )
+        qs = build_interface_qs_with_ip_addresses().filter(pk=name_or_id).restrict(user, action="view")
     else:
-        qs = (
-            build_interface_qs_with_ip_addresses()
-            .filter(name=name_or_id)
-            .restrict(user, action="view")
-        )
+        qs = build_interface_qs_with_ip_addresses().filter(name=name_or_id).restrict(user, action="view")
     interfaces = list(qs)
     if not interfaces:
         raise ValueError(f"Interface '{name_or_id}' not found")
@@ -374,17 +369,9 @@ def _sync_ipaddress_list(user: User, limit: int, cursor: str | None) -> dict[str
 def _sync_ipaddress_get(user: User, name_or_id: str) -> dict[str, Any]:
     """Sync implementation of ipaddress_get (D-02 + D-03)."""
     if _looks_like_uuid(name_or_id):
-        qs = (
-            build_ipaddress_qs_with_interfaces()
-            .filter(pk=name_or_id)
-            .restrict(user, action="view")
-        )
+        qs = build_ipaddress_qs_with_interfaces().filter(pk=name_or_id).restrict(user, action="view")
     else:
-        qs = (
-            build_ipaddress_qs_with_interfaces()
-            .filter(address=name_or_id)
-            .restrict(user, action="view")
-        )
+        qs = build_ipaddress_qs_with_interfaces().filter(address=name_or_id).restrict(user, action="view")
     ips = list(qs)
     if not ips:
         raise ValueError(f"IP address '{name_or_id}' not found")
@@ -493,76 +480,100 @@ def _sync_search_by_name(
     all_results: list[dict[str, Any]] = []
 
     # Search Device
-    qs_device = build_device_qs().restrict(user, action="view").filter(
-        functools.reduce(op.and_, [_name_contains("name", t) for t in terms])
+    qs_device = (
+        build_device_qs()
+        .restrict(user, action="view")
+        .filter(functools.reduce(op.and_, [_name_contains("name", t) for t in terms]))
     )
     for device in qs_device:
-        all_results.append({
-            "model": "dcim.device",
-            "pk": str(device.pk),
-            "name": device.name,
-            "data": serialize_device(device),
-        })
+        all_results.append(
+            {
+                "model": "dcim.device",
+                "pk": str(device.pk),
+                "name": device.name,
+                "data": serialize_device(device),
+            }
+        )
 
     # Search Interface
-    qs_interface = build_interface_qs().restrict(user, action="view").filter(
-        functools.reduce(op.and_, [_name_contains("name", t) for t in terms])
+    qs_interface = (
+        build_interface_qs()
+        .restrict(user, action="view")
+        .filter(functools.reduce(op.and_, [_name_contains("name", t) for t in terms]))
     )
     for interface in qs_interface:
-        all_results.append({
-            "model": "dcim.interface",
-            "pk": str(interface.pk),
-            "name": interface.name,
-            "data": serialize_interface(interface),
-        })
+        all_results.append(
+            {
+                "model": "dcim.interface",
+                "pk": str(interface.pk),
+                "name": interface.name,
+                "data": serialize_interface(interface),
+            }
+        )
 
     # Search IPAddress (search address field)
-    qs_ip = build_ipaddress_qs().restrict(user, action="view").filter(
-        functools.reduce(op.and_, [_address_contains(t) for t in terms])
+    qs_ip = (
+        build_ipaddress_qs()
+        .restrict(user, action="view")
+        .filter(functools.reduce(op.and_, [_address_contains(t) for t in terms]))
     )
     for ip in qs_ip:
-        all_results.append({
-            "model": "ipam.ipaddress",
-            "pk": str(ip.pk),
-            "name": ip.address,
-            "data": serialize_ipaddress(ip),
-        })
+        all_results.append(
+            {
+                "model": "ipam.ipaddress",
+                "pk": str(ip.pk),
+                "name": ip.address,
+                "data": serialize_ipaddress(ip),
+            }
+        )
 
     # Search Prefix (search prefix field — network portion)
-    qs_prefix = build_prefix_qs().restrict(user, action="view").filter(
-        functools.reduce(op.and_, [_prefix_contains(t) for t in terms])
+    qs_prefix = (
+        build_prefix_qs()
+        .restrict(user, action="view")
+        .filter(functools.reduce(op.and_, [_prefix_contains(t) for t in terms]))
     )
     for prefix in qs_prefix:
-        all_results.append({
-            "model": "ipam.prefix",
-            "pk": str(prefix.pk),
-            "name": prefix.prefix,
-            "data": serialize_prefix(prefix),
-        })
+        all_results.append(
+            {
+                "model": "ipam.prefix",
+                "pk": str(prefix.pk),
+                "name": prefix.prefix,
+                "data": serialize_prefix(prefix),
+            }
+        )
 
     # Search VLAN
-    qs_vlan = build_vlan_qs().restrict(user, action="view").filter(
-        functools.reduce(op.and_, [_name_contains("name", t) for t in terms])
+    qs_vlan = (
+        build_vlan_qs()
+        .restrict(user, action="view")
+        .filter(functools.reduce(op.and_, [_name_contains("name", t) for t in terms]))
     )
     for vlan in qs_vlan:
-        all_results.append({
-            "model": "ipam.vlan",
-            "pk": str(vlan.pk),
-            "name": vlan.name,
-            "data": serialize_vlan(vlan),
-        })
+        all_results.append(
+            {
+                "model": "ipam.vlan",
+                "pk": str(vlan.pk),
+                "name": vlan.name,
+                "data": serialize_vlan(vlan),
+            }
+        )
 
     # Search Location
-    qs_location = build_location_qs().restrict(user, action="view").filter(
-        functools.reduce(op.and_, [_name_contains("name", t) for t in terms])
+    qs_location = (
+        build_location_qs()
+        .restrict(user, action="view")
+        .filter(functools.reduce(op.and_, [_name_contains("name", t) for t in terms]))
     )
     for location in qs_location:
-        all_results.append({
-            "model": "dcim.location",
-            "pk": str(location.pk),
-            "name": location.name,
-            "data": serialize_location(location),
-        })
+        all_results.append(
+            {
+                "model": "dcim.location",
+                "pk": str(location.pk),
+                "name": location.name,
+                "data": serialize_location(location),
+            }
+        )
 
     # Sort by model then name for consistent ordering
     all_results.sort(key=lambda r: (r["model"], r["name"]))
@@ -584,7 +595,7 @@ def _sync_search_by_name(
 
     total_count = len(all_results)
     limit = max(1, min(limit, 1000))
-    page = all_results[start_idx:start_idx + limit]
+    page = all_results[start_idx : start_idx + limit]
     has_next = start_idx + limit < total_count
     next_cursor = None
     if has_next and page:

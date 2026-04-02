@@ -407,15 +407,18 @@ class TestSearchByName(TestCase):
     @patch("nautobot_app_mcp_server.mcp.tools.query_utils.build_prefix_qs")
     @patch("nautobot_app_mcp_server.mcp.tools.query_utils.build_vlan_qs")
     @patch("nautobot_app_mcp_server.mcp.tools.query_utils.build_location_qs")
-    def test_search_by_name_and_semantics(
-        self, mock_loc, mock_vlan, mock_pfx, mock_ip, mock_iface, mock_dev
-    ):
+    def test_search_by_name_and_semantics(self, mock_loc, mock_vlan, mock_pfx, mock_ip, mock_iface, mock_dev):
         from nautobot_app_mcp_server.mcp.tools.query_utils import _sync_search_by_name
 
         # Each model returns empty
-        for mock_qs in [mock_dev.return_value, mock_iface.return_value,
-                         mock_ip.return_value, mock_pfx.return_value,
-                         mock_vlan.return_value, mock_loc.return_value]:
+        for mock_qs in [
+            mock_dev.return_value,
+            mock_iface.return_value,
+            mock_ip.return_value,
+            mock_pfx.return_value,
+            mock_vlan.return_value,
+            mock_loc.return_value,
+        ]:
             mock_qs.restrict.return_value = mock_qs
             mock_qs.__iter__ = lambda self: iter([])
 
@@ -475,9 +478,14 @@ class TestAuthEnforcement(TestCase):
     ):
         from nautobot_app_mcp_server.mcp.tools.query_utils import _sync_search_by_name
 
-        for mock_qs in [mock_dev.return_value, mock_iface.return_value,
-                         mock_ip.return_value, mock_pfx.return_value,
-                         mock_vlan.return_value, mock_loc.return_value]:
+        for mock_qs in [
+            mock_dev.return_value,
+            mock_iface.return_value,
+            mock_ip.return_value,
+            mock_pfx.return_value,
+            mock_vlan.return_value,
+            mock_loc.return_value,
+        ]:
             mock_qs.restrict.return_value = mock_qs
             mock_qs.__iter__ = lambda self: iter([])
 
@@ -486,9 +494,14 @@ class TestAuthEnforcement(TestCase):
 
         # Each of the 6 models should have restrict called
         restrict_calls = 0
-        for mock_qs in [mock_dev.return_value, mock_iface.return_value,
-                         mock_ip.return_value, mock_pfx.return_value,
-                         mock_vlan.return_value, mock_loc.return_value]:
+        for mock_qs in [
+            mock_dev.return_value,
+            mock_iface.return_value,
+            mock_ip.return_value,
+            mock_pfx.return_value,
+            mock_vlan.return_value,
+            mock_loc.return_value,
+        ]:
             restrict_calls += mock_qs.restrict.call_count
         self.assertEqual(restrict_calls, 6)
 
