@@ -40,6 +40,8 @@ unset VIRTUAL_ENV && poetry run invoke yamllint       # lint YAML files
 unset VIRTUAL_ENV && poetry run invoke mkdocs          # build docs
 unset VIRTUAL_ENV && poetry run invoke pylint          # run pylint
 unset VIRTUAL_ENV && poetry run invoke start           # start Docker Compose dev stack
+unset VIRTUAL_ENV && poetry run invoke cli             # shell into running container
+unset VIRTUAL_ENV && poetry run invoke unittest        # run unit tests only (no linters)
 
 # Run a single command in the venv
 unset VIRTUAL_ENV && poetry run nautobot-server --version
@@ -70,6 +72,93 @@ The dev environment uses **Docker Compose** defined in `development/`.
    poetry run invoke ruff --fix        # auto-fix lint issues
    poetry run invoke coverage          # run tests with coverage
    ```
+
+---
+
+## Testing Workflow
+
+All tests run **inside the Docker container** where Nautobot and all dependencies are installed.
+
+### Start and Access the Container
+
+```bash
+# Start the dev stack (from host)
+unset VIRTUAL_ENV && poetry run invoke start
+
+# Shell into the running container
+docker exec -it nautobot-app-mcp-server-nautobot-1 /bin/bash
+```
+
+### Run Tests (Inside Container Shell)
+
+```bash
+cd /source
+
+# Run only the MCP unit tests (fastest — ~0.6s)
+poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests
+
+# Run all unit tests for this app
+poetry run nautobot-server test nautobot_app_mcp_server
+
+# Run the full test suite from host (linters + unit tests)
+unset VIRTUAL_ENV && poetry run invoke tests
+
+# Run just linters from host
+unset VIRTUAL_ENV && poetry run invoke ruff [--fix]
+unset VIRTUAL_ENV && poetry run invoke pylint
+```
+
+### Inspect Modules and Debug Imports
+
+```bash
+# List what a module exports
+python -c 'import mcp.server; print([x for x in dir(mcp.server) if not x.startswith("_")])'
+
+# Check if a specific import works
+python -c 'from fastmcp.server.context import Context; print(Context)'
+python -c 'from mcp.types import Tool; print(Tool)'
+
+# Verify source file changes work (source is volume-mounted at /source)
+python -c 'import nautobot_app_mcp_server.mcp.server; print("OK")'
+```
+
+### Rebuild Docker Image (Required After Dependency Changes)
+
+```bash
+# Only needed when pyproject.toml or poetry.lock changes
+unset VIRTUAL_ENV && poetry run invoke build
+
+# After rebuild: remove old containers so Docker uses the new image
+docker compose -f development/docker-compose.dev.yml down
+docker compose -f development/docker-compose.dev.yml up --detach
+
+# Verify new image is running
+docker exec nautobot-app-mcp-server-nautobot-1 pip show fastmcp
+```
+
+### Key Gotchas
+
+| Issue | Cause | Solution |
+|---|---|---|
+| `ImportError` on `mcp.server.Context` | FastMCP 3.x moved types | Use `from fastmcp.server.context import Context` |
+| `ImportError` on `mcp.server.ToolInstance` | FastMCP 3.x moved types | Use `from mcp.types import Tool` |
+| `@mcp.list_tools()` raises `TypeError` | FastMCP 3.x: async, not a decorator | Override `mcp._list_tools_mcp` directly |
+| Source changes not picked up | Depends on whether it's volume-mounted | Source at `/source` IS volume-mounted — changes are immediate |
+| `VIRTUAL_ENV=/usr` errors | WSL inherited env var | Always `unset VIRTUAL_ENV` before Poetry commands |
+| Tests pass but `invoke tests` fails | `ruff format` or lint issues | Run `ruff format` in container: `cd /source && ruff format .` |
+
+### Run Tests from Host Without Shelling In
+
+```bash
+# Entire pipeline: linters + unit tests
+unset VIRTUAL_ENV && poetry run invoke tests
+
+# Just unit tests
+unset VIRTUAL_ENV && poetry run invoke unittest
+
+# With coverage
+unset VIRTUAL_ENV && poetry run invoke unittest --coverage
+```
 
 ---
 
