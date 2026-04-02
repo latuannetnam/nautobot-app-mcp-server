@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
 from nautobot_app_mcp_server.mcp import register_mcp_tool
 
-
 # -------------------------------------------------------------------
 # MCPSessionState — thin wrapper over FastMCP session dict (D-26)
 # -------------------------------------------------------------------
