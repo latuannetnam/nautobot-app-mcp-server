@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
 import uuid
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
@@ -12,8 +12,8 @@ from nautobot_app_mcp_server.mcp.tools.pagination import (
     LIMIT_MAX,
     LIMIT_SUMMARIZE,
     PaginatedResult,
-    encode_cursor,
     decode_cursor,
+    encode_cursor,
     paginate_queryset,
 )
 
@@ -498,8 +498,9 @@ class TestAnonymousFallback(TestCase):
 
     @patch("nautobot_app_mcp_server.mcp.tools.query_utils.build_device_qs")
     def test_anonymous_user_returns_empty(self, mock_build_qs):
-        from nautobot_app_mcp_server.mcp.tools.query_utils import _sync_device_list
         from django.contrib.auth.models import AnonymousUser
+
+        from nautobot_app_mcp_server.mcp.tools.query_utils import _sync_device_list
 
         mock_qs = MagicMock()
         mock_build_qs.return_value = mock_qs
@@ -534,24 +535,31 @@ class TestPaginationIntegration(TestCase):
         mock_qs.__getitem__ = lambda self, key: [mock_item] * 100  # 100 items
         mock_qs.count.return_value = 500
 
-        with patch.object(mock_qs, "count", return_value=500) as mock_count:
-            result = paginate_queryset(mock_qs, limit=100, cursor=None)
-            self.assertIsNotNone(result.summary)
-            self.assertEqual(result.summary["total_count"], 500)
+        result = paginate_queryset(mock_qs, limit=100, cursor=None)
+        self.assertIsNotNone(result.summary)
+        self.assertEqual(result.summary["total_count"], 500)
 
     def test_cursor_roundtrip_integration(self):
         """PAGE-04: Full cursor round-trip through paginate_queryset."""
         pk = uuid.uuid4()
         mock_item = MagicMock(pk=pk)
-        mock_qs = MagicMock()
-        # Simulate 2 items when slicing with [:2] (limit=1 → limit+1=2),
-        # confirming there is a next page
-        mock_qs.__getitem__ = lambda self, key: (
-            [mock_item, mock_item] if key == slice(0, 2) else [mock_item]
-        )
-        mock_qs.count.return_value = 1
 
-        result = paginate_queryset(mock_qs, limit=1, cursor=None)
+        # Use a plain object (not MagicMock) to avoid __getitem__ signature issues.
+        # paginate_queryset calls list(qs[:limit+1]), which passes
+        # slice(None, 2, None) for limit=1. We check key.stop == 2 to detect
+        # the limit+1 slice vs the limit slice.
+        class FakeQuerySet:
+            def __getitem__(self, key):
+                # limit+1 slice ([:2]): return 2 items → has_next=True
+                # limit slice ([:1]): return 1 item → no next
+                if hasattr(key, "stop") and key.stop == 2:
+                    return [mock_item, mock_item]
+                return [mock_item]
+
+            def count(self):
+                return 1
+
+        result = paginate_queryset(FakeQuerySet(), limit=1, cursor=None)
         self.assertTrue(result.has_next_page())
         self.assertIsNotNone(result.cursor)
 

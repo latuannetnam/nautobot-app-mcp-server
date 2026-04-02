@@ -140,17 +140,17 @@ class RegistrySingletonTestCase(TestCase):
 
         registry.register(
             ToolDefinition(
-                name="device_list",
+                name="qwerty_asdf_12345_tool",
                 func=lambda: None,
-                description="List devices",
+                description="A tool with a unique name",
                 input_schema={"type": "object"},
                 tier="core",
             )
         )
 
-        results = registry.fuzzy_search("DEVICE")
+        results = registry.fuzzy_search("QWERTY_ASDF_12345")
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].name, "device_list")
+        self.assertEqual(results[0].name, "qwerty_asdf_12345_tool")
 
     def test_fuzzy_search_matches_description(self):
         """fuzzy_search() matches tool descriptions (case-insensitive)."""
@@ -158,17 +158,17 @@ class RegistrySingletonTestCase(TestCase):
 
         registry.register(
             ToolDefinition(
-                name="prefix_list",
+                name="unique_zxcv_987_tool",
                 func=lambda: None,
-                description="List IP prefixes",
+                description="A unique description term zxcv_unique_term_987",
                 input_schema={"type": "object"},
                 tier="core",
             )
         )
 
-        results = registry.fuzzy_search("prefixes")
+        results = registry.fuzzy_search("ZXCV_UNIQUE_TERM_987")
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].name, "prefix_list")
+        self.assertEqual(results[0].name, "unique_zxcv_987_tool")
 
     def test_fuzzy_search_no_match(self):
         """fuzzy_search() returns empty list when no match."""
