@@ -16,20 +16,16 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 - [x] MCPToolRegistry singleton (thread-safe, in-memory) for tool registration
 - [x] `post_migrate` signal for tool registration (runs after all apps' ready() hooks)
 - [x] Public `register_mcp_tool()` API for third-party Nautobot apps
+- [x] 10 Core read tools: device_list, device_get, interface_list, interface_get, ipaddress_list, ipaddress_get, prefix_list, vlan_list, location_list, search_by_name *(Phase 03)*
+- [x] Nautobot token auth extraction from Authorization header *(Phase 03)*
+- [x] Nautobot object-level permissions via `.restrict(user, action="view")` *(Phase 03)*
+- [x] Cursor-based pagination (limit default=25, max=1000) with auto-summarize at 100+ *(Phase 03)*
 
 ### Active
 
-- [ ] Nautobot MCP server embedded in Django process via FastMCP ASGI app
 - [ ] Streamable HTTP endpoint at `/plugins/nautobot-app-mcp-server/mcp/` with `stateless_http=False`
-- [ ] 10 Core read tools: device_list, device_get, interface_list, interface_get, ipaddress_list, ipaddress_get, prefix_list, vlan_list, location_list, search_by_name
 - [ ] 3 Meta tools: mcp_enable_tools, mcp_disable_tools, mcp_list_tools
-- [ ] MCPToolRegistry singleton (thread-safe, in-memory) for tool registration
 - [ ] Session state per Mcp-Session-Id via FastMCP StreamableHTTPSessionManager
-- [ ] Nautobot token auth extraction from Authorization header
-- [ ] Nautobot object-level permissions via `.restrict(user, action="view")`
-- [ ] Cursor-based pagination (limit default=25, max=1000) with auto-summarize at 100+
-- [ ] `post_migrate` signal for tool registration (runs after all apps' ready() hooks)
-- [ ] Public `register_mcp_tool()` API for third-party Nautobot apps
 - [ ] `nautobot-mcp-skill` SKILL.md package with tool reference and workflows
 - [ ] All code exercised by unit tests (full coverage of MCP behavior)
 
@@ -73,7 +69,7 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 | FastMCP ASGI app embedded in Django | Zero network overhead, direct ORM access, embedded in Nautobot process | — Pending |
 | `stateless_http=False` with Mcp-Session-Id | Per-conversation scope state works across all MCP clients | — Pending |
 | `post_migrate` signal for tool registration | Fires after all apps' ready() hooks — guarantees MCP server tools registered before third-party apps call `register_mcp_tool()` | — Pending |
-| Cursor-based pagination (base64 PK) | Stable across concurrent writes, memory-safe, avoids offset instability | — Pending |
+| Cursor-based pagination (base64 PK) | Stable across concurrent writes, memory-safe, avoids offset instability | ✅ Implemented Phase 03 |
 | Progressive disclosure (Core + Per-model tiers) | Avoids tool explosion in Claude context; session state controls visibility | — Pending |
 | `select_related`/`prefetch_related` chains per tool | Memory optimization, follows netnam-cms-core patterns | — Pending |
 | Package name `nautobot_app_mcp_server` | Matches actual directory name (DESIGN.md uses `nautobot_mcp_server`) | ⚠️ Needs resolution |
@@ -82,4 +78,4 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 
 ---
 
-*Last updated: 2026-04-01 after initialization*
+*Last updated: 2026-04-02 after Phase 03 completion*
