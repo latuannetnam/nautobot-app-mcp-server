@@ -14,6 +14,15 @@ from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 class RegistrySingletonTestCase(TestCase):
     """Test the MCPToolRegistry singleton thread-safety."""
 
+    def setUp(self) -> None:
+        """Snapshot registry state before each test."""
+        self._snapshot = dict(MCPToolRegistry._tools)
+
+    def tearDown(self) -> None:
+        """Restore registry state after each test."""
+        MCPToolRegistry._tools.clear()
+        MCPToolRegistry._tools.update(self._snapshot)
+
     def test_singleton_returns_same_instance(self):
         """Two calls to get_instance() return the same object."""
         r1 = MCPToolRegistry.get_instance()
@@ -28,7 +37,7 @@ class RegistrySingletonTestCase(TestCase):
         self.assertIsInstance(MCPToolRegistry._lock, threading.Lock)
 
     def test_register_raises_on_duplicate_name(self):
-        """Registering two tools with the same name raises ValueError."""
+        """Registered two tools with the same name raises ValueError."""
         registry = MCPToolRegistry.get_instance()
 
         def dummy_func():
@@ -170,6 +179,15 @@ class RegistrySingletonTestCase(TestCase):
 class RegisterMCPToolAPITestCase(TestCase):
     """Test the public register_mcp_tool() API."""
 
+    def setUp(self) -> None:
+        """Snapshot registry state before each test."""
+        self._snapshot = dict(MCPToolRegistry._tools)
+
+    def tearDown(self) -> None:
+        """Restore registry state after each test."""
+        MCPToolRegistry._tools.clear()
+        MCPToolRegistry._tools.update(self._snapshot)
+
     def test_register_mcp_tool_works(self):
         """register_mcp_tool() successfully registers a tool."""
 
@@ -214,7 +232,7 @@ class PostMigrateSignalTestCase(TestCase):
     """Test the post_migrate signal wiring."""
 
     def test_ready_connects_post_migrate(self):
-        """NautobotAppMcpServerConfig.ready() connects post_migrate signal."""
+        """NautobotAppMcpServerConfig.ready() connect post_migrate signal."""
         # The handler is connected by ready() called at app startup
         # Just verify the signal module is accessible
         self.assertTrue(hasattr(post_migrate, "connect"))
