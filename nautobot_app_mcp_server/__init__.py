@@ -30,9 +30,9 @@ class NautobotAppMcpServerConfig(NautobotAppConfig):
         At that point all other apps' ready() hooks have already run,
         so their register_mcp_tool() calls are already in the registry.
         """
-        import nautobot_app_mcp_server.mcp.tools  # noqa: F401
-
         from django.db.models.signals import post_migrate
+
+        import nautobot_app_mcp_server.mcp.tools  # noqa: F401
 
         post_migrate.connect(self._on_post_migrate, sender=self)
 

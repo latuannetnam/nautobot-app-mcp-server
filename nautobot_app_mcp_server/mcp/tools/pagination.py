@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import base64
-import math
-from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import sync_to_async
 
