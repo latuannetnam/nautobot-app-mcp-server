@@ -139,7 +139,10 @@ convention = "google"
 ]
 "nautobot_app_mcp_server/tests/*" = [
     "D",
-    "S"
+    "S",
+]
+"nautobot_app_mcp_server/mcp/tests/*" = [
+    "D",
 ]
 
 [tool.coverage.run]

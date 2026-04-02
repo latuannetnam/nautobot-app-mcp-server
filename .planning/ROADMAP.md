@@ -261,17 +261,19 @@ nautobot-mcp-skill/
 
 | Req ID | Requirement | Status |
 |---|---|---|
-| REGI-05 | `@mcp.list_tools()` override for progressive disclosure | Pending |
-| AUTH-01 | `get_user_from_request()` from MCP request context `Authorization: Token` | Pending |
-| AUTH-02 | `AnonymousUser` returns empty queryset + debug warning | Pending |
-| AUTH-03 | `.restrict(user, action="view")` on every queryset | Pending |
-| SESS-01 | `MCPSessionState` dataclass with `enabled_scopes` and `enabled_searches` | Pending |
-| SESS-02 | Session state stored per `Mcp-Session-Id` via FastMCP session manager | Pending |
-| SESS-03 | `mcp_enable_tools(scope=...)` tool | Pending |
-| SESS-04 | `mcp_disable_tools(scope=...)` tool | Pending |
-| SESS-05 | `mcp_list_tools()` tool | Pending |
-| SESS-06 | Core tools always enabled regardless of session state | Pending |
-| TEST-06 | Auth test: valid token → data, invalid → empty + warning | Pending |
+| REGI-05 | `@mcp.list_tools()` override for progressive disclosure | **Completed** |
+| AUTH-01 | `get_user_from_request()` from MCP request context `Authorization: Token` | **Completed** |
+| AUTH-02 | `AnonymousUser` returns empty queryset + debug warning | **Completed** |
+| AUTH-03 | `.restrict(user, action="view")` on every queryset | **Completed** |
+| SESS-01 | `MCPSessionState` dataclass with `enabled_scopes` and `enabled_searches` | **Completed** |
+| SESS-02 | Session state stored per `Mcp-Session-Id` via FastMCP session manager | **Completed** |
+| SESS-03 | `mcp_enable_tools(scope=...)` tool | **Completed** |
+| SESS-04 | `mcp_disable_tools(scope=...)` tool | **Completed** |
+| SESS-05 | `mcp_list_tools()` tool | **Completed** |
+| SESS-06 | Core tools always enabled regardless of session state | **Completed** |
+| TEST-06 | Auth test: valid token → data, invalid → empty + warning | **Completed** |
+
+**Executed:** 2026-04-01, commits `c8469cb`→`750878f`
 
 ### Phase 3 — Core Read Tools
 
@@ -294,7 +296,7 @@ nautobot-mcp-skill/
 | PAGE-05 | `sync_to_async(fn, thread_sensitive=True)` for all ORM calls | **Completed** |
 | TEST-02 | `test_core_tools.py` — ORM mocking, pagination, auth | **Completed** |
 
-**Executed:** 2026-04-02 (Plans 01+02+03), commits (e861e2b→033728b→84f9c03→f18ff4c→c8a71ec→9948527)
+**Executed:** 2026-04-02 (Plans 01+02+03), commits (5b3dca1→0341f98→373c770→...)
 
 ### Phase 4 — SKILL.md Package
 
