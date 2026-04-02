@@ -26,7 +26,7 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 - [ ] Streamable HTTP endpoint at `/plugins/nautobot-app-mcp-server/mcp/` with `stateless_http=False`
 - [ ] 3 Meta tools: mcp_enable_tools, mcp_disable_tools, mcp_list_tools
 - [ ] Session state per Mcp-Session-Id via FastMCP StreamableHTTPSessionManager
-- [ ] `nautobot-mcp-skill` SKILL.md package with tool reference and workflows
+- [x] `nautobot-mcp-skill` SKILL.md package with tool reference and workflows *(Phase 04)*
 - [ ] All code exercised by unit tests (full coverage of MCP behavior)
 
 ### Out of Scope
