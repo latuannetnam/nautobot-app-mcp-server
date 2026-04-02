@@ -468,3 +468,78 @@ register_mcp_tool(
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
 )
+
+
+# -------------------------------------------------------------------
+# search_by_name
+# -------------------------------------------------------------------
+
+
+async def _search_by_name_handler(
+    ctx: ToolContext,
+    query: str,
+    limit: int = 25,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    """Multi-model name search across devices, interfaces, IPs, prefixes, VLANs, and locations.
+
+    Performs an AND search across all terms — all search terms must appear
+    somewhere in the object's name (or address for IP addresses).
+
+    Examples:
+        - "juniper router" — finds objects whose name contains both "juniper" AND "router"
+        - "edge" — finds all objects with "edge" in the name
+
+    Args:
+        ctx: FastMCP ToolContext.
+        query: Space-separated search terms (e.g. "juniper router").
+        limit: Maximum number of results to return (default 25, max 1000).
+        cursor: Optional pagination cursor from a previous response.
+
+    Returns:
+        dict with items (list of result dicts), cursor, total_count, summary.
+        Each item has: model, pk, name, data (serialized object).
+
+    Raises:
+        ValueError: If the query is empty or whitespace-only.
+    """
+    user = get_user_from_request(ctx)
+    return await sync_to_async(query_utils._sync_search_by_name, thread_sensitive=True)(
+        user=user, query=query, limit=limit, cursor=cursor
+    )
+
+
+register_mcp_tool(
+    name="search_by_name",
+    func=_search_by_name_handler,
+    description=(
+        "Multi-model name search across devices, interfaces, IP addresses, prefixes, "
+        "VLANs, and locations. All search terms must match (AND semantics)."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Space-separated search terms. All terms must appear in the "
+                    "object's name (AND match). Case-insensitive. "
+                    "Example: 'juniper router' finds objects with both terms."
+                ),
+            },
+            "limit": {
+                "type": "integer",
+                "default": 25,
+                "description": "Maximum number of results to return (default 25, max 1000).",
+            },
+            "cursor": {
+                "type": "string",
+                "description": "Pagination cursor from a previous response.",
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
