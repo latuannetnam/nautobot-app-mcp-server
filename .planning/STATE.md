@@ -3,24 +3,24 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-04-02T06:49:29.290Z"
+last_updated: "2026-04-02T07:31:50.650Z"
 progress:
-  total_phases: 3
-  completed_phases: 2
+  total_phases: 4
+  completed_phases: 4
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-02 (Phase 3 Plans 01+02+03 executed — pagination + 10 core tools + search_by_name + tests complete)
+**Last updated:** 2026-04-02 (Phase 4 Plan 01 executed — SKILL.md package complete, all 3 requirements done)
 **Roadmap:** `.planning/ROADMAP.md`
 
 ---
 
 ## Current Phase
 
-**Phase 3 — Core Read Tools** (All 3 plans complete — Plans 01+02+03 executed)
+**Phase 4 — SKILL.md Package** (Plan 01 complete — SKILL.md package created, SKILL-01/02/03 done)
 
 ---
 
@@ -31,8 +31,8 @@ progress:
 | Phase 0 | Project Setup | Not Started | — | — | None |
 | Phase 1 | MCP Server Infrastructure | **Executed** | 2026-04-01 | 2026-04-01 | Phase 0 |
 | Phase 2 | Authentication & Sessions | **Executed** | 2026-04-01 | 2026-04-01 | Phase 1 |
-| Phase 3 | Core Read Tools | **In Progress** | 2026-04-02 | — | Phase 1 |
-| Phase 4 | SKILL.md Package | Not Started | — | — | Phases 1–3 |
+| Phase 3 | Core Read Tools | **Executed** | 2026-04-02 | 2026-04-02 | Phase 1 |
+| Phase 4 | SKILL.md Package | **Executed** | 2026-04-02 | 2026-04-02 | Phases 1–3 |
 
 ---
 
@@ -46,8 +46,8 @@ progress:
 | Phase 1 | MCP Server Infrastructure | 14 | **14** | 0 | 0 |
 | Phase 2 | Authentication & Sessions | 10 | **10** | 0 | 0 |
 | Phase 3 | Core Read Tools | 15 | **15** | 0 | 0 |
-| Phase 4 | SKILL.md Package | 3 | 0 | 0 | 3 |
-| **Total** | | **47** | **39** | **0** | **8** |
+| Phase 4 | SKILL.md Package | 3 | **3** | 0 | 0 |
+| **Total** | | **47** | **42** | **0** | **5** |
 
 ---
 
@@ -117,6 +117,20 @@ progress:
 | `interface_get` ip_addresses | Flat `{pk, address}` dicts | Deep serialization deferred to `interface_get` itself |
 | `__init__.py` triggers `core` import | `from nautobot_app_mcp_server.mcp.tools import core` | Ensures all `register_mcp_tool()` calls fire on package load |
 | `paginate_queryset_async` in `__all__` | Added despite plan omission | Public API needed for tests and future tools |
+
+## Phase 4 — Decisions Made During Execution
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| SKILL.md dual location | SKILL.md at repo root (sdist via MANIFEST.in) AND inside `nautobot_mcp_skill/` (wheel via `package-data` glob) | `package-data` globs are relative to package subdirectory; repo-root `MANIFEST.in` only covers sdist |
+| `package-data` in pyproject.toml | `package-data = {nautobot_mcp_skill = ["SKILL.md"]}` | Wheels don't read MANIFEST.in; explicit glob needed for wheel inclusion |
+| Version alignment | Static `__version__` in `__init__.py` + `setuptools.dynamic.version = {attr}` | Single source of truth; no runtime deps needed |
+
+## Phase 4 Plan 01 — Decisions Made During Execution
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Blocking wheel bug fix | Added `package-data` + copied SKILL.md into package dir | `include-package-data` alone doesn't help wheels; discovered during Task 3 verification |
 
 ### Phase 3 Plan 03 — Decisions Made During Execution
 
