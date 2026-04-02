@@ -49,15 +49,15 @@
 
 ### Core Read Tools
 
-- [ ] **TOOL-01**: `device_list` — list devices with status, platform, location; select_related; paginate; restrict(user)
-- [ ] **TOOL-02**: `device_get` — single device by name or pk with interfaces prefetched
-- [ ] **TOOL-03**: `interface_list` — list interfaces filtered by device_name; paginate; restrict(user)
-- [ ] **TOOL-04**: `interface_get` — single interface by pk with ip_addresses prefetched
-- [ ] **TOOL-05**: `ipaddress_list` — list IP addresses with tenant, vrf; paginate; restrict(user)
-- [ ] **TOOL-06**: `ipaddress_get` — single IP address by address or pk with interfaces prefetched
-- [ ] **TOOL-07**: `prefix_list` — list prefixes with vrf, tenant; paginate; restrict(user)
-- [ ] **TOOL-08**: `vlan_list` — list VLANs with site, group; paginate; restrict(user)
-- [ ] **TOOL-09**: `location_list` — list locations with location_type, parent; paginate; restrict(user)
+- [x] **TOOL-01**: `device_list` — list devices with status, platform, location; select_related; paginate; restrict(user)
+- [x] **TOOL-02**: `device_get` — single device by name or pk with interfaces prefetched
+- [x] **TOOL-03**: `interface_list` — list interfaces filtered by device_name; paginate; restrict(user)
+- [x] **TOOL-04**: `interface_get` — single interface by pk with ip_addresses prefetched
+- [x] **TOOL-05**: `ipaddress_list` — list IP addresses with tenant, vrf; paginate; restrict(user)
+- [x] **TOOL-06**: `ipaddress_get` — single IP address by address or pk with interfaces prefetched
+- [x] **TOOL-07**: `prefix_list` — list prefixes with vrf, tenant; paginate; restrict(user)
+- [x] **TOOL-08**: `vlan_list` — list VLANs with site, group; paginate; restrict(user)
+- [x] **TOOL-09**: `location_list` — list locations with location_type, parent; paginate; restrict(user)
 - [ ] **TOOL-10**: `search_by_name` — multi-model name search across devices, interfaces, IPs, prefixes, VLANs, locations
 
 ### Pagination & Serialization
@@ -66,7 +66,7 @@
 - [ ] **PAGE-02**: `LIMIT_SUMMARIZE=100` — auto-summarize when raw count > 100, count BEFORE slicing
 - [ ] **PAGE-03**: `PaginatedResult` dataclass with items, cursor, total_count, summary fields
 - [ ] **PAGE-04**: Cursor encoding as `base64(str(pk))` — works for UUID and string PKs
-- [ ] **PAGE-05**: `sync_to_async(fn, thread_sensitive=True)` for all ORM calls inside async tool handlers
+- [x] **PAGE-05**: `sync_to_async(fn, thread_sensitive=True)` for all ORM calls inside async tool handlers
 
 ### SKILL.md Package
 
@@ -127,21 +127,21 @@
 | SESS-04 | Phase 2 | Pending |
 | SESS-05 | Phase 2 | Pending |
 | SESS-06 | Phase 2 | Pending |
-| TOOL-01 | Phase 3 | Pending |
-| TOOL-02 | Phase 3 | Pending |
-| TOOL-03 | Phase 3 | Pending |
-| TOOL-04 | Phase 3 | Pending |
-| TOOL-05 | Phase 3 | Pending |
-| TOOL-06 | Phase 3 | Pending |
-| TOOL-07 | Phase 3 | Pending |
-| TOOL-08 | Phase 3 | Pending |
-| TOOL-09 | Phase 3 | Pending |
+| TOOL-01 | Phase 3 | Complete |
+| TOOL-02 | Phase 3 | Complete |
+| TOOL-03 | Phase 3 | Complete |
+| TOOL-04 | Phase 3 | Complete |
+| TOOL-05 | Phase 3 | Complete |
+| TOOL-06 | Phase 3 | Complete |
+| TOOL-07 | Phase 3 | Complete |
+| TOOL-08 | Phase 3 | Complete |
+| TOOL-09 | Phase 3 | Complete |
 | TOOL-10 | Phase 3 | Pending |
 | PAGE-01 | Phase 3 | Pending |
 | PAGE-02 | Phase 3 | Pending |
 | PAGE-03 | Phase 3 | Pending |
 | PAGE-04 | Phase 3 | Pending |
-| PAGE-05 | Phase 3 | Pending |
+| PAGE-05 | Phase 3 | Complete |
 | SKILL-01 | Phase 4 | Pending |
 | SKILL-02 | Phase 4 | Pending |
 | SKILL-03 | Phase 4 | Pending |

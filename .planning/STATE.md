@@ -7,22 +7,22 @@ last_updated: "2026-04-02"
 current_phase: "03"
 current_phase_name: "Core Read Tools"
 progress:
-  total_phases: 3
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 1
+  total_phases: 4
+  completed_phases: 2
+  total_plans: 5
+  completed_plans: 2
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-01 (Phase 2 executed — all 6 tasks complete)
+**Last updated:** 2026-04-02 (Phase 3 Plans 01+02 executed — pagination + 10 core tools complete)
 **Roadmap:** `.planning/ROADMAP.md`
 
 ---
 
 ## Current Phase
 
-**Phase 2 — Authentication & Sessions** (Executed)
+**Phase 3 — Core Read Tools** (In Progress — Plan 03 pending)
 
 ---
 
@@ -33,7 +33,7 @@ progress:
 | Phase 0 | Project Setup | Not Started | — | — | None |
 | Phase 1 | MCP Server Infrastructure | **Executed** | 2026-04-01 | 2026-04-01 | Phase 0 |
 | Phase 2 | Authentication & Sessions | **Executed** | 2026-04-01 | 2026-04-01 | Phase 1 |
-| Phase 3 | Core Read Tools | Not Started | — | — | Phase 1 |
+| Phase 3 | Core Read Tools | **In Progress** | 2026-04-02 | — | Phase 1 |
 | Phase 4 | SKILL.md Package | Not Started | — | — | Phases 1–3 |
 
 ---
@@ -47,9 +47,9 @@ progress:
 | Phase 0 | Project Setup | 4 | 0 | 0 | 4 |
 | Phase 1 | MCP Server Infrastructure | 14 | **14** | 0 | 0 |
 | Phase 2 | Authentication & Sessions | 10 | **10** | 0 | 0 |
-| Phase 3 | Core Read Tools | 15 | 0 | 0 | 15 |
+| Phase 3 | Core Read Tools | 15 | **10** | 0 | 5 |
 | Phase 4 | SKILL.md Package | 3 | 0 | 0 | 3 |
-| **Total** | | **47** | **24** | **0** | **23** |
+| **Total** | | **47** | **34** | **0** | **13** |
 
 ---
 
@@ -109,6 +109,17 @@ progress:
 
 ---
 
+## Phase 3 — Decisions Made During Execution
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| `sync_to_async` + query_utils split | Async handlers in `core.py` import `query_utils` for `_sync_*` helpers | Avoids circular imports; ORM stays in sync code |
+| `_looks_like_uuid()` regex | `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` | Works for both UUID and non-UUID identifiers |
+| `search_by_name` implementation | Sequential per-model queries + in-memory merge | Union would lose model type without discriminator column |
+| `interface_get` ip_addresses | Flat `{pk, address}` dicts | Deep serialization deferred to `interface_get` itself |
+| `__init__.py` triggers `core` import | `from nautobot_app_mcp_server.mcp.tools import core` | Ensures all `register_mcp_tool()` calls fire on package load |
+| `paginate_queryset_async` in `__all__` | Added despite plan omission | Public API needed for tests and future tools |
+
 ## Open Questions
 
 | Question | Impact | Priority |
@@ -126,7 +137,8 @@ progress:
 | 0.1.0-dev | 2026-04-01 | Phase 1 planned | Initial roadmap created |
 | 0.1.0-dev | 2026-04-01 | Phase 1 executed | All 11 tasks complete; commit 13ca60e |
 | 0.1.0-dev | 2026-04-01 | Phase 2 executed | All 6 tasks complete; 7 commits (c8469cb→750878f) |
+| 0.1.0-dev | 2026-04-02 | Phase 3 Plans 01+02 executed | Pagination + 10 core read tools; commits (e861e2b→033728b) |
 
 ---
 
-*State last updated: 2026-04-01*
+*State last updated: 2026-04-02*
