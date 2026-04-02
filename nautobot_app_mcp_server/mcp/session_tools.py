@@ -265,10 +265,7 @@ register_mcp_tool(
         "properties": {
             "scope": {
                 "type": "string",
-                "description": (
-                    "Dot-separated scope to disable (e.g. 'dcim'). "
-                    "None disables all non-core tools."
-                ),
+                "description": ("Dot-separated scope to disable (e.g. 'dcim'). " "None disables all non-core tools."),
             },
         },
         "additionalProperties": False,
