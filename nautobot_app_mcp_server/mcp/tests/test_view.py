@@ -71,6 +71,21 @@ class MCPViewTestCase(TestCase):
 class MCPAppFactoryTestCase(TestCase):
     """Test the lazy factory for the FastMCP ASGI app."""
 
+    def setUp(self) -> None:
+        """Reset _mcp_app before each test."""
+        # pylint: disable=protected-access
+        from nautobot_app_mcp_server.mcp import server as server_module
+
+        self._old_app = server_module._mcp_app
+        server_module._mcp_app = None
+
+    def tearDown(self) -> None:
+        """Restore _mcp_app after each test."""
+        # pylint: disable=protected-access
+        from nautobot_app_mcp_server.mcp import server as server_module
+
+        server_module._mcp_app = self._old_app
+
     def test_get_mcp_app_returns_starlette_app(self):
         """get_mcp_app returns a Starlette application."""
         # Import without triggering app creation
@@ -82,32 +97,22 @@ class MCPAppFactoryTestCase(TestCase):
 
     def test_mcp_app_lazy_initialization(self):
         """get_mcp_app creates the app on first call, not at module import."""
-        from nautobot_app_mcp_server.mcp import server as server_module
+        # _mcp_app already reset to None by setUp
+        from nautobot_app_mcp_server.mcp.server import get_mcp_app
 
-        # Reset the global to test lazy behavior
-        old_app = server_module._mcp_app
-        server_module._mcp_app = None
-
-        try:
-            from nautobot_app_mcp_server.mcp.server import get_mcp_app
-
-            # get_mcp_app should be a callable
-            self.assertTrue(callable(get_mcp_app))
-        finally:
-            server_module._mcp_app = old_app
+        # get_mcp_app should be a callable
+        self.assertTrue(callable(get_mcp_app))
 
     def test_get_mcp_app_twice_returns_same_instance(self):
         """Calling get_mcp_app twice returns the same app object (not re-created)."""
-        from nautobot_app_mcp_server.mcp import server as server_module
-
-        old_app = server_module._mcp_app
-        server_module._mcp_app = None  # Reset
-
-        try:
+        # _mcp_app already reset to None by setUp
+        # Patch http_app to avoid real HTTP setup during tests
+        with patch(
+            "nautobot_app_mcp_server.mcp.server.FastMCP.http_app",
+            return_value=MagicMock(),
+        ):
             from nautobot_app_mcp_server.mcp.server import get_mcp_app
 
             app1 = get_mcp_app()
             app2 = get_mcp_app()
             self.assertIs(app1, app2)
-        finally:
-            server_module._mcp_app = old_app

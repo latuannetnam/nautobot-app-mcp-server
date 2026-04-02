@@ -31,10 +31,10 @@ class RegistrySingletonTestCase(TestCase):
 
     def test_singleton_has_lock(self):
         """The registry has a threading.Lock for thread-safety."""
-        import threading
+        import _thread
 
         self.assertTrue(hasattr(MCPToolRegistry, "_lock"))
-        self.assertIsInstance(MCPToolRegistry._lock, threading.Lock)
+        self.assertIsInstance(MCPToolRegistry._lock, _thread.lock)
 
     def test_register_raises_on_duplicate_name(self):
         """Registered two tools with the same name raises ValueError."""
@@ -247,7 +247,7 @@ class PostMigrateSignalTestCase(TestCase):
 
         # Should not raise and should not register any tools
         with patch(
-            "nautobot_app_mcp_server.MCPToolRegistry.get_instance",
+            "nautobot_app_mcp_server.mcp.registry.MCPToolRegistry.get_instance",
             return_value=MagicMock(),
         ):
             NautobotAppMcpServerConfig._on_post_migrate(mock_other_app)

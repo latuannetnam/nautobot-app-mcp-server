@@ -42,7 +42,6 @@ def _setup_mcp_app() -> FastMCP:
 
     mcp = FastMCP(
         "NautobotMCP",
-        stateless_http=False,
         json_response=True,
     )
 
@@ -74,6 +73,11 @@ def get_mcp_app() -> Starlette:
     """
     global _mcp_app  # pylint: disable=global-statement
     if _mcp_app is None:
-        mcp = _setup_mcp_app()
-        _mcp_app = mcp.streamable_http_app(path="/mcp")
+        mcp_instance = _setup_mcp_app()
+        _mcp_app = mcp_instance.http_app(
+            path="/mcp",
+            transport="streamable-http",
+            stateless_http=False,
+            json_response=True,
+        )
     return _mcp_app
