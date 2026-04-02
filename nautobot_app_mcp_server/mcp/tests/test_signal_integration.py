@@ -31,8 +31,6 @@ class RegistrySingletonTestCase(TestCase):
 
     def test_singleton_has_lock(self):
         """The registry has a threading.Lock for thread-safety."""
-        import _thread
-
         self.assertTrue(hasattr(MCPToolRegistry, "_lock"))
         lock = MCPToolRegistry._lock
         # threading.Lock() creates _thread.lock instances; verify by calling acquire

@@ -28,11 +28,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from fastmcp.server.context import Context as ToolContext
+from mcp.types import Tool as ToolInstance
+
 if TYPE_CHECKING:
     from fastmcp import FastMCP
-
-from mcp.server import Context as ToolContext
-from mcp.server import ToolInstance
 
 from nautobot_app_mcp_server.mcp import register_mcp_tool
 
@@ -92,7 +92,7 @@ class MCPSessionState:
 
 async def _list_tools_handler(
     ctx: ToolContext,
-) -> list[ToolInstance]:  # noqa: ANN201
+) -> list[ToolInstance]:
     """Return tools filtered by session state (progressive disclosure, REGI-05).
 
     Always included core tools (D-27). Non-core tools are included if:
@@ -106,8 +106,6 @@ async def _list_tools_handler(
     Returns:
         List of MCP ToolInstance objects for the MCP manifest.
     """
-    from mcp.server import ToolInstance
-
     from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 
     session = ctx.request_context.session
