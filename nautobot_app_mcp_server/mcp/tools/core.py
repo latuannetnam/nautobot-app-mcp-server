@@ -12,7 +12,7 @@ from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 from nautobot_app_mcp_server.mcp.tools import query_utils
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AnonymousUser
+    pass
 
 TOOLS_SCOPE = "core"
 TOOLS_TIER = "core"

@@ -10,7 +10,13 @@ from nautobot_app_mcp_server.mcp.tools.pagination import (
     decode_cursor,
     encode_cursor,
     paginate_queryset,
+    paginate_queryset_async,
 )
+
+# Side-effect import to trigger core tools registration via register_mcp_tool().
+# Must come after pagination import since core tools depend on query_utils
+# which imports from pagination.
+from nautobot_app_mcp_server.mcp.tools import core  # noqa: F401
 
 __all__ = [
     "LIMIT_DEFAULT",
@@ -20,4 +26,5 @@ __all__ = [
     "decode_cursor",
     "encode_cursor",
     "paginate_queryset",
+    "paginate_queryset_async",
 ]
