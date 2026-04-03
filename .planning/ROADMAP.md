@@ -367,9 +367,9 @@ nautobot-mcp-skill/
 
 | Req ID | Requirement | Status |
 |---|---|---|
-| REFA-01 | `view.py`: replace `asyncio.run()` with `async_to_sync(_call_starlette_handler)` | Pending |
-| REFA-02 | `view.py`: `async with session_manager.run():` before `handle_request()` | Pending |
-| REFA-03 | `view.py`: ASGI scope dict built from Django request (server, scheme, client, path, query_string, headers, method, http_version) | Pending |
+| REFA-01 | `view.py`: replace `asyncio.run()` with `async_to_sync(_call_starlette_handler)` | **Completed** (WAVE2-VIEW, 21e2f6d) |
+| REFA-02 | `view.py`: `async with session_manager.run():` before `handle_request()` | **Completed** (WAVE2-VIEW, 21e2f6d) |
+| REFA-03 | `view.py`: ASGI scope dict built from Django request (server, scheme, client, path, query_string, headers, method, http_version) | **Completed** (WAVE2-VIEW, 21e2f6d) |
 | REFA-04 | `server.py`: `get_session_manager()` returning `StreamableHTTPSessionManager` singleton | **Completed** (WAVE1-SERVER, 5010d32) |
 | REFA-05 | `server.py`: `threading.Lock` double-checked locking on `_mcp_app` | **Completed** (WAVE1-SERVER, 5010d32) |
 | AUTH-01 | `auth.py`: `ctx.request_context._cached_user` caching (D-13, D-14) | **Completed** (WAVE1-AUTH, 52c235c) |
