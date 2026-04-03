@@ -3,38 +3,32 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 from django.http import HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from starlette.types import Receive, Scope, Send
 
-from nautobot_app_mcp_server.mcp.server import get_session_manager
-
-if TYPE_CHECKING:
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-
+from nautobot_app_mcp_server.mcp.server import get_mcp_app
 
 # Stores the Django HttpRequest for the duration of the async bridge call.
 # Allows sync tool wrappers to access the request without coupling to MCP internals.
 _django_request_ctx: ContextVar[HttpRequest] = ContextVar("django_request")
 
 
-async def _call_starlette_handler(
-    django_request: HttpRequest,
-    session_manager: StreamableHTTPSessionManager,
-) -> HttpResponse:
-    """Bridge a Django HttpRequest into FastMCP via StreamableHTTPSessionManager.
+async def _bridge_django_to_asgi(django_request: HttpRequest) -> HttpResponse:
+    """Bridge a Django HttpRequest into the FastMCP ASGI app.
 
     This is the WSGI→ASGI bridge. It:
     1. Stores the Django request in _django_request_ctx for tool access
     2. Builds an ASGI scope from the Django request (REFA-03)
     3. Defines receive() returning the actual request body
     4. Defines send() collecting http.response.start + http.response.body
-    5. Enters session_manager.run() — sets Server.request_context (REFA-02)
-    6. Calls handle_request() — FastMCP protocol runs (REFA-01)
-    7. Assembles and returns the Django HttpResponse
+    5. Calls the Starlette ASGI app (lifespan already running session_manager.run())
+
+    The lifespan (started by _ensure_lifespan_started in server.py) keeps
+    FastMCP's StreamableHTTPSessionManager.run() alive in a background thread,
+    so sessions persist across Django requests without needing per-request run() calls.
     """
     _django_request_ctx.set(django_request)
 
@@ -95,11 +89,11 @@ async def _call_starlette_handler(
         elif message["type"] == "http.response.body":
             response_body.extend(message.get("body", b""))
 
-    # REFA-02: Enter session_manager.run() — this sets Server.request_context
-    # so that Server.request_context.get() works inside tool handlers.
-    # REFA-01: async_to_sync is the outer wrapper (see mcp_view below).
-    async with session_manager.run():
-        await session_manager.handle_request(scope, receive, send)
+    # Call the Starlette ASGI app directly.
+    # The lifespan started by _ensure_lifespan_started() keeps session_manager.run()
+    # alive in a background thread, so sessions are managed globally.
+    asgi_app = get_mcp_app()
+    await asgi_app(scope, receive, send)
 
     # Assemble Django HttpResponse from collected messages
     status = response_started.get("status", 500)
@@ -116,7 +110,8 @@ def mcp_view(request: HttpRequest) -> HttpResponse:
     """Django view: /plugins/nautobot-app-mcp-server/mcp/.
 
     Receives all HTTP methods (GET, POST, DELETE) and bridges them to FastMCP
-    via StreamableHTTPSessionManager.
+    via the Starlette ASGI app. The lifespan is started once in a background
+    thread and keeps FastMCP's session manager running for all requests.
 
     The bridge uses asgiref.sync.async_to_sync (NOT asyncio.run) so that
     FastMCP's event loop persists across requests and session state is preserved.
@@ -127,5 +122,4 @@ def mcp_view(request: HttpRequest) -> HttpResponse:
     Returns:
         Django HttpResponse with the MCP JSON-RPC response.
     """
-    session_manager = get_session_manager()
-    return async_to_sync(_call_starlette_handler)(request, session_manager)
+    return async_to_sync(_bridge_django_to_asgi)(request)

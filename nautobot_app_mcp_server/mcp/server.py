@@ -9,19 +9,31 @@ Architecture:
                               → get_mcp_app() [lazy]
                               → mcp.http_app() [ASGI app]
                               → FastMCP handles MCP protocol
+
+Lifespan management:
+    FastMCP's StreamableHTTPSessionManager requires session_manager.run()
+    to be called inside a lifespan context (where _task_group is initialized).
+    We start the lifespan once at first request and keep it alive for the
+    process lifetime, giving sessions a valid task group to register into.
 """
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from typing import TYPE_CHECKING
 
+import anyio
+from asgiref.sync import async_to_sync
 from fastmcp import FastMCP
 from fastmcp.server.context import Context as ToolContext
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from starlette.applications import Starlette
+from starlette.routing import Route
 
 if TYPE_CHECKING:
-    from starlette.applications import Starlette
+    from starlette.requests import Request
+    from starlette.responses import Response
+    from starlette.types import ASGIApp
 
 # Shared FastMCP instance — ensures only one server is ever created
 _mcp_instance: FastMCP | None = None
@@ -31,6 +43,12 @@ _mcp_app: Starlette | None = None
 
 # Lock for thread-safe app singleton creation
 _app_lock = threading.Lock()
+
+# Lifespan management
+_lifespan_started: bool = False
+_lifespan_lock: asyncio.Lock | None = None
+# Guard to prevent concurrent lifespan start from multiple workers
+_lifespan_guard: threading.Lock = threading.Lock()
 
 
 def _setup_mcp_app() -> FastMCP:
@@ -114,6 +132,41 @@ def _make_mock_tool_context(session_dict: dict) -> ToolContext:
     return mock_ctx  # type: ignore[return-value]
 
 
+def _ensure_lifespan_started(app: Starlette) -> None:
+    """Start the Starlette lifespan once in a background thread.
+
+    FastMCP's StreamableHTTPSessionManager requires session_manager.run() to be
+    called inside a lifespan context (task group initialized by anyio).
+    Since Django views run synchronously (not in an async context), we start
+    the lifespan in a dedicated background thread with its own event loop.
+    This gives the session manager a valid task group for the process lifetime.
+    """
+    global _lifespan_started, _lifespan_lock  # pylint: disable=global-statement
+    if _lifespan_started:
+        return
+    with _lifespan_guard:
+        if _lifespan_started:
+            return
+        _lifespan_lock = asyncio.Lock()
+
+        def run_lifespan():
+            async def lifespan_runner():
+                async with _lifespan_lock:
+                    async with app.router.lifespan_context(app):
+                        # Lifespan is now running; keep it alive indefinitely
+                        await asyncio.Event().wait()  # type: ignore[union-attr]
+
+            asyncio.run(lifespan_runner())
+
+        t = threading.Thread(target=run_lifespan, daemon=True)
+        t.start()
+        # Give the lifespan time to start
+        import time
+
+        time.sleep(0.5)
+        _lifespan_started = True
+
+
 def get_mcp_app() -> Starlette:
     """Lazily build the FastMCP ASGI app on first HTTP request.
 
@@ -142,35 +195,5 @@ def get_mcp_app() -> Starlette:
                     stateless_http=False,
                     json_response=True,
                 )
+                _ensure_lifespan_started(_mcp_app)
     return _mcp_app
-
-
-def get_session_manager() -> StreamableHTTPSessionManager:
-    """Return a fresh StreamableHTTPSessionManager backed by the shared FastMCP server.
-
-    Each call returns a new manager instance. The underlying _mcp_instance
-    (FastMCP server) is shared so only one FastMCP server is ever created.
-
-    StreamableHTTPSessionManager.run() is request-scoped — it sets
-    Server.request_context and holds resources for the duration of one HTTP
-    request. It MUST NOT be reused across requests (raises RuntimeError on
-    repeated calls to run() on the same instance).
-
-    The caller (view.py) receives a fresh manager per request, ensuring each
-    call to async_to_sync(_call_starlette_handler) gets a manager that can
-    safely enter session_manager.run().
-
-    Returns:
-        A new StreamableHTTPSessionManager backed by the shared FastMCP server.
-
-    Raises:
-        RuntimeError: If called before Django is fully initialized.
-    """
-    global _mcp_instance  # pylint: disable=global-statement
-    if _mcp_instance is None:
-        _mcp_instance = _setup_mcp_app()
-    return StreamableHTTPSessionManager(
-        app=_mcp_instance._mcp_server,
-        json_response=True,
-        stateless=False,
-    )

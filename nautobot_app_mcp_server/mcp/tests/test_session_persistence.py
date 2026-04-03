@@ -20,14 +20,33 @@ import uuid
 
 import requests  # noqa: I001 — requests is a test-only dependency
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.test import TestCase, override_settings, tag
+from django.test.utils import skipUnless
 from nautobot.users.models import Token
+
+
+def _is_live_server_available() -> bool:
+    """Return True if a live Nautobot server is reachable at localhost:8080."""
+    import socket
+
+    try:
+        sock = socket.create_connection(("localhost", 8080), timeout=1)
+        sock.close()
+        return True
+    except (socket.error, OSError):
+        return False
 
 
 @override_settings(
     PLUGINS=["nautobot_app_mcp_server"],
     ROOT_URLCONF="nautobot_app_mcp_server.urls",
+    APPEND_SLASH=False,  # POST must not be redirected by APPEND_SLASH middleware
 )
+@skipUnless(
+    _is_live_server_available(),
+    "Live Nautobot server not reachable at localhost:8080 — run via docker exec for E2E verification",
+)
+@tag("requires_live_server")
 class MCPSessionPersistenceTestCase(TestCase):
     """TEST-02: Two sequential MCP HTTP POSTs share Mcp-Session-Id; second
     mcp_list_tools reflects scopes enabled in the first (session persistence)."""
@@ -44,10 +63,9 @@ class MCPSessionPersistenceTestCase(TestCase):
                 password="testpass",  # noqa: S106
             )
         cls.user = user_model.objects.filter(is_superuser=True).first()
-        cls.token = Token.objects.create(
-            user=cls.user,
-            key="nbapikey_test_session_persist_123",
-        )
+        cls.token = Token.objects.create(user=cls.user)
+        # Trailing slash required by Django APPEND_SLASH; do NOT follow redirects
+        # since Django can't preserve POST body on 307 redirect.
         cls.endpoint = "/plugins/nautobot-app-mcp-server/mcp/"
         cls.base_url = "http://localhost:8080"
         cls.session_id = str(uuid.uuid4())  # Fresh session ID for this test
@@ -68,16 +86,18 @@ class MCPSessionPersistenceTestCase(TestCase):
         }
         headers = {
             "Content-Type": "application/json",
+            "Accept": "application/json",
             "Authorization": f"Token {self.token.key}",
         }
         if session_id:
-            headers["Mcp-Session-Id"] = session_id
+            headers["mcp-session-id"] = session_id  # lowercase as per ASGI spec
 
         response = requests.post(
             f"{self.base_url}{self.endpoint}",
             json=payload,
             headers=headers,
             timeout=10,
+            allow_redirects=False,  # POST with body must NOT follow 307 to /mcp/ (404s)
         )
         return response
 
@@ -94,16 +114,18 @@ class MCPSessionPersistenceTestCase(TestCase):
         }
         headers = {
             "Content-Type": "application/json",
+            "Accept": "application/json",
             "Authorization": f"Token {self.token.key}",
         }
         if session_id:
-            headers["Mcp-Session-Id"] = session_id
+            headers["mcp-session-id"] = session_id  # lowercase as per ASGI spec
 
         response = requests.post(
             f"{self.base_url}{self.endpoint}",
             json=payload,
             headers=headers,
             timeout=10,
+            allow_redirects=False,  # POST with body must NOT follow 307 to /mcp/ (404s)
         )
         return response
 

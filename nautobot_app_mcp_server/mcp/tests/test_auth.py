@@ -2,10 +2,46 @@
 
 from __future__ import annotations
 
+import uuid
 from unittest.mock import MagicMock
 
 from django.contrib.auth.models import AnonymousUser
+from django.db import connection
 from django.test import TestCase
+
+
+def _create_token(user) -> object:
+    """Create a Nautobot Token bypassing the ORM's save() method.
+
+    Token.save() has a side effect with BaseModel's UUID default + force_insert
+    that causes `user_id` to become NULL in PostgreSQL during the INSERT.
+    Using a raw INSERT bypasses this issue.
+    """
+    from django.utils import timezone
+
+    token_id = uuid.uuid4()
+    key = uuid.uuid4().hex + uuid.uuid4().hex[:8]  # 40-char hex key
+    created = timezone.now()
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO users_token (id, user_id, created, key, write_enabled, description) "
+            "VALUES (%s, %s, %s, %s, true, '')",
+            [str(token_id), user.id, created, key],
+        )
+    # Return an object with the minimal interface needed by the tests
+    token = MagicMock()
+    token.id = token_id
+    token.key = key
+    token.pk = token_id
+    token._user_id = user.id
+    token.delete = lambda: _delete_token(token_id)
+    return token
+
+
+def _delete_token(token_id):
+    """Delete a token by its UUID."""
+    with connection.cursor() as cursor:
+        cursor.execute("DELETE FROM users_token WHERE id = %s", [str(token_id)])
 
 
 class GetUserFromRequestTestCase(TestCase):
@@ -20,8 +56,14 @@ class GetUserFromRequestTestCase(TestCase):
         mock_request.headers = {}
         if authorization is not None:
             mock_request.headers["Authorization"] = authorization
+        # Use a plain class (not MagicMock) to avoid auto-creating _cached_user
         mock_ctx = MagicMock()
-        mock_ctx.request_context.request = mock_request
+
+        class _BareRequestContext:
+            def __init__(self):
+                self.request = mock_request
+
+        mock_ctx.request_context = _BareRequestContext()
         return mock_ctx
 
     def test_missing_authorization_header_returns_anonymous(self):
@@ -50,36 +92,38 @@ class GetUserFromRequestTestCase(TestCase):
         self.assertIsInstance(user, AnonymousUser)
 
     def test_non_nbapikey_token_returns_anonymous(self):
-        """AUTH-02: Token without nbapikey_ prefix → AnonymousUser."""
+        """AUTH-02: Token without "Token " prefix → AnonymousUser."""
         from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 
         ctx = self._make_mock_ctx(authorization="Token abcdefghijklmnop")
         user = get_user_from_request(ctx)
         self.assertIsInstance(user, AnonymousUser)
 
-    def test_valid_nbapikey_token_returns_user(self):
-        """AUTH-01: Valid nbapikey_ token → correct Nautobot User returned."""
+    def test_valid_token_returns_user(self):
+        """AUTH-01: Valid Token key → correct Nautobot User returned."""
         from django.contrib.auth import get_user_model
-        from nautobot.users.models import Token
 
         User = get_user_model()
-        # Ensure we have at least one superuser to test with
-        if not User.objects.filter(is_superuser=True).exists():
-            User.objects.create_superuser(
+        user_obj = User.objects.filter(is_superuser=True).first()
+        if not user_obj:
+            user_obj = User.objects.create_superuser(
                 username="testadmin",
                 email="admin@test.local",
                 password="testpass",  # noqa: S106
             )
-        user_obj = User.objects.filter(is_superuser=True).first()
-
-        token = Token.objects.create(user=user_obj, key=Token.generate_key())
+        if not user_obj:
+            user_obj = User.objects.create_superuser(
+                username="testadmin",
+                email="admin@test.local",
+                password="testpass",  # noqa: S106
+            )
+        token = _create_token(user_obj)
 
         try:
             from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 
-            # Use _BareRequestContext to ensure _cached_user is absent (no MagicMock auto-create)
             mock_request = MagicMock()
-            mock_request.headers = {"Authorization": f"Token nbapikey_{token.key}"}
+            mock_request.headers = {"Authorization": f"Token {token.key}"}
 
             class _BareRequestContext:
                 def __init__(self):
@@ -93,12 +137,14 @@ class GetUserFromRequestTestCase(TestCase):
             token.delete()
 
     def test_valid_token_wrong_key_returns_anonymous(self):
-        """AUTH-02: Valid format but unknown key → AnonymousUser + DEBUG log."""
+        """AUTH-02: Valid format but unknown key → AnonymousUser + DEBUG log.
+
+        A UUID-based key guarantees no collision with any existing token.
+        """
         from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 
-        ctx = self._make_mock_ctx(
-            authorization="Token nbapikey_nonexistentkey000000",
-        )
+        nonexistent_key = uuid.uuid4().hex + uuid.uuid4().hex[:8]  # 40-char hex
+        ctx = self._make_mock_ctx(authorization=f"Token {nonexistent_key}")
         with self.assertLogs("nautobot_app_mcp_server.mcp.auth", level="DEBUG") as cm:
             user = get_user_from_request(ctx)
         self.assertIsInstance(user, AnonymousUser)
@@ -119,11 +165,16 @@ class GetUserFromRequestTestCase(TestCase):
         the second call should return the cached user without hitting the DB.
         """
         from django.contrib.auth import get_user_model
-        from nautobot.users.models import Token
 
         User = get_user_model()
         user_obj = User.objects.filter(is_superuser=True).first()
-        token = Token.objects.create(user=user_obj, key=Token.generate_key())
+        if not user_obj:
+            user_obj = User.objects.create_superuser(
+                username="testadmin",
+                email="admin@test.local",
+                password="testpass",  # noqa: S106
+            )
+        token = _create_token(user_obj)
 
         try:
             from nautobot_app_mcp_server.mcp.auth import get_user_from_request
@@ -157,11 +208,16 @@ class GetUserFromRequestTestCase(TestCase):
         stores the result on ctx.request_context._cached_user, and returns it.
         """
         from django.contrib.auth import get_user_model
-        from nautobot.users.models import Token
 
         User = get_user_model()
         user_obj = User.objects.filter(is_superuser=True).first()
-        token = Token.objects.create(user=user_obj, key=Token.generate_key())
+        if not user_obj:
+            user_obj = User.objects.create_superuser(
+                username="testadmin",
+                email="admin@test.local",
+                password="testpass",  # noqa: S106
+            )
+        token = _create_token(user_obj)
 
         try:
             from nautobot_app_mcp_server.mcp.auth import get_user_from_request
@@ -198,11 +254,16 @@ class GetUserFromRequestTestCase(TestCase):
         perform the DB lookup, cache the result, and return the user.
         """
         from django.contrib.auth import get_user_model
-        from nautobot.users.models import Token
 
         User = get_user_model()
         user_obj = User.objects.filter(is_superuser=True).first()
-        token = Token.objects.create(user=user_obj, key=Token.generate_key())
+        if not user_obj:
+            user_obj = User.objects.create_superuser(
+                username="testadmin",
+                email="admin@test.local",
+                password="testpass",  # noqa: S106
+            )
+        token = _create_token(user_obj)
 
         try:
             from nautobot_app_mcp_server.mcp.auth import get_user_from_request

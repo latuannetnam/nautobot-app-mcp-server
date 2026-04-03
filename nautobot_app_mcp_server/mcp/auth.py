@@ -2,7 +2,7 @@
 
 Auth flow:
     1. Extract Authorization header from MCP request (NOT Django request)
-    2. Parse "Token nbapikey_xxx" format
+    2. Parse "Token <hex_key>" format (Nautobot Token keys are 40-char hex)
     3. Check _cached_user on ctx.request_context (AUTH-01 cache)
     4. Cache miss → look up Nautobot Token object → return User (AUTH-02)
     5. Cache the user on ctx.request_context._cached_user
@@ -23,14 +23,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Token prefix used by Nautobot API tokens
-TOKEN_PREFIX = "nbapikey_"  # noqa: S105
+# NOTE: Nautobot Token keys are 40-char hex strings (no "nbapikey_" prefix).
 
 
 def get_user_from_request(ctx: ToolContext):  # noqa: ANN201
     """Extract the Nautobot user from the MCP request Authorization header.
 
-    Attempts to authenticate via ``Authorization: Token nbapikey_xxx`` header.
+    Attempts to authenticate via ``Authorization: Token <40-char-hex>`` header.
     Falls back to ``AnonymousUser`` (never raises) — empty querysets returned.
 
     Caches the authenticated user on ctx.request_context._cached_user (D-13).
@@ -63,12 +62,7 @@ def get_user_from_request(ctx: ToolContext):  # noqa: ANN201
 
     token_key = auth_header[6:]  # Strip "Token "
 
-    if not token_key.startswith(TOKEN_PREFIX):
-        logger.debug("MCP: Invalid auth token (not a Nautobot nbapikey token)")
-        return AnonymousUser()
-
-    # Look up the Nautobot API token
-    real_token_key = token_key[len(TOKEN_PREFIX) :]
+    # Look up the Nautobot API token directly by its 40-char hex key
 
     # AUTH-01 / AUTH-02: Check request_context cache first (D-13, D-14)
     # _cached_user is stored on the RequestContext dataclass (not ServerSession).
@@ -81,7 +75,7 @@ def get_user_from_request(ctx: ToolContext):  # noqa: ANN201
     try:
         from nautobot.users.models import Token
 
-        token = Token.objects.select_related("user").get(key=real_token_key)
+        token = Token.objects.select_related("user").get(key=token_key)
         user = token.user
     except Exception:  # noqa: BLE001 — Token.DoesNotExist or DB errors
         logger.debug("MCP: Invalid auth token attempted")
