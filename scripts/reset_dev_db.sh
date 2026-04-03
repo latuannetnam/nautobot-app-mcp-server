@@ -96,7 +96,7 @@ container_exec migrate --noinput
 
 # Recreate superuser (if not exists)
 log "Ensuring superuser exists..."
-container_exec shell -c "
+container_exec shell --command "
 from django.contrib.auth import get_user_model
 User = get_user_model()
 if not User.objects.filter(username='$NAUTOBOT_SUPERUSER_NAME').exists():
