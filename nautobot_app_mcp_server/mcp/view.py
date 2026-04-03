@@ -1,82 +1,125 @@
 """ASGI bridge: Django HttpRequest → FastMCP ASGI app → Django HttpResponse."""
 
-import asyncio
+from __future__ import annotations
 
-from django.http import HttpResponse
+from contextvars import ContextVar
+from typing import TYPE_CHECKING
 
-from nautobot_app_mcp_server.mcp.server import get_mcp_app
+from asgiref.sync import async_to_sync
+from django.http import HttpRequest, HttpResponse
+from starlette.datastructures import Headers
+from starlette.types import Receive, Scope, Send
+
+from nautobot_app_mcp_server.mcp.server import get_session_manager
+
+if TYPE_CHECKING:
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 
-def mcp_view(request):
-    """Bridge: Django HttpRequest → FastMCP ASGI app → Django HttpResponse.
+# Stores the Django HttpRequest for the duration of the async bridge call.
+# Allows sync tool wrappers to access the request without coupling to MCP internals.
+_django_request_ctx: ContextVar[HttpRequest] = ContextVar("django_request")
 
-    FastMCP's http_app() is a native ASGI app: async(scope, receive, send).
-    Since Django's runserver is synchronous, we create a fresh asyncio event loop
-    with asyncio.run() to drive the async FastMCP app to completion.
+
+async def _call_starlette_handler(
+    django_request: HttpRequest,
+    session_manager: StreamableHTTPSessionManager,
+) -> HttpResponse:
+    """Bridge a Django HttpRequest into FastMCP via StreamableHTTPSessionManager.
+
+    This is the WSGI→ASGI bridge. It:
+    1. Stores the Django request in _django_request_ctx for tool access
+    2. Builds an ASGI scope from the Django request (REFA-03)
+    3. Defines receive() returning the actual request body
+    4. Defines send() collecting http.response.start + http.response.body
+    5. Enters session_manager.run() — sets Server.request_context (REFA-02)
+    6. Calls handle_request() — FastMCP protocol runs (REFA-01)
+    7. Assembles and returns the Django HttpResponse
     """
-    mcp_app = get_mcp_app()  # Lazy: created on first request
+    _django_request_ctx.set(django_request)
 
-    # Build ASGI scope from Django request.
-    # FastMCP mounts its HTTP handler at /mcp (inside this Django view's /mcp/ path).
-    # So we pass path='/mcp' (the FastMCP mount point) and root_path='/plugins/nautobot-app-mcp-server'
-    # (the Django prefix that is stripped before routing to this view).
+    # REFA-03: Full ASGI scope from Django request
     plugin_prefix = "/plugins/nautobot-app-mcp-server"
-    full_path = request.path
-    assert full_path.startswith(plugin_prefix + "/mcp"), (
-        f"Unexpected request.path: {full_path!r}; expected to start with {plugin_prefix!r}"
-    )
+    full_path = django_request.path
+    if not full_path.startswith(plugin_prefix + "/mcp"):  # noqa: S101
+        msg = f"Unexpected request.path: {full_path!r}; expected to start with {plugin_prefix!r}"
+        raise ValueError(msg)
     mcp_path = full_path[len(plugin_prefix):]  # e.g. '/mcp/' → '/mcp/'
 
-    scope = {
+    # Build headers list: lowercased keys, latin-1 encoded
+    headers_list: list[tuple[bytes, bytes]] = [
+        (k.lower().encode("latin-1"), v.encode("latin-1"))
+        for k, v in django_request.headers.items()
+        if k.lower() != "content-length"
+    ]
+
+    # Add Content-Length from actual body size
+    body = django_request.body
+    content_length = str(len(body)).encode("latin-1")
+    headers_list.append((b"content-length", content_length))
+
+    scope: Scope = {
         "type": "http",
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
-        "method": request.method,
-        "query_string": request.META.get("QUERY_STRING", "").encode("utf-8"),
-        "root_path": plugin_prefix,
+        "method": django_request.method,
+        "query_string": django_request.META.get("QUERY_STRING", "").encode("latin-1"),
         "path": mcp_path,
-        "headers": [
-            (k.lower().encode("utf-8"), v.encode("utf-8"))
-            for k, v in request.headers.items()
-        ],
-        "server": ("127.0.0.1", 8080),
+        "root_path": plugin_prefix,
+        "headers": headers_list,
+        # REFA-03: server derived from request, not hardcoded
+        "server": (django_request.get_host(), django_request.get_port()),
+        # REFA-03: scheme from request.is_secure()
+        "scheme": "https" if django_request.is_secure() else "http",
+        # REFA-03: client from META
+        "client": (django_request.META.get("REMOTE_ADDR", ""), 0),
     }
 
-    # Collect ASGI messages from the FastMCP app
-    messages: list[dict] = []
-    status_code = [200]
-    response_headers: dict[str, str] = {}
+    # receive() returns the actual request body, not empty
+    async def receive() -> Receive:
+        return {"type": "http.request", "body": body, "more_body": False}
 
-    async def receive():
-        # FastMCP's streamable-http reads body asynchronously; send empty initially
-        return {"type": "http.request", "body": b"", "more_body": False}
+    # send() collects start and body messages into mutable containers
+    response_started: dict = {}
+    response_body = bytearray()
 
-    async def send(message: dict):
-        messages.append(message)
+    async def send(message: Send) -> None:
         if message["type"] == "http.response.start":
-            status_code[0] = message.get("status", 200)
-            response_headers = {k.decode(): v.decode() for k, v in message.get("headers", [])}
+            response_started["status"] = message.get("status", 200)
+            response_started["headers"] = Headers(raw=message.get("headers", []))
+        elif message["type"] == "http.response.body":
+            response_body.extend(message.get("body", b""))
 
-    # Drive the async FastMCP app to completion
-    asyncio.run(mcp_app(scope, receive, send))
+    # REFA-02: Enter session_manager.run() — this sets Server.request_context
+    # so that Server.request_context.get() works inside tool handlers.
+    # REFA-01: async_to_sync is the outer wrapper (see mcp_view below).
+    async with session_manager.run():
+        await session_manager.handle_request(scope, receive, send)
 
-    if not messages:
-        return HttpResponse("MCP endpoint ready", status=200)
+    # Assemble Django HttpResponse from collected messages
+    status = response_started.get("status", 500)
+    headers = response_started.get("headers", Headers(raw=[]))
 
-    # FastMCP streams responses — assemble final body from all http.response.body messages
-    body = b"".join(
-        msg.get("body", b"") if isinstance(msg.get("body"), bytes) else (msg.get("body", "") or "").encode("utf-8")
-        for msg in messages
-        if msg["type"] == "http.response.body"
-    )
-
-    # Extract headers from the start message
-    headers: dict[str, str] = {}
-    for msg in messages:
-        if msg["type"] == "http.response.start":
-            headers = {k.decode(): v.decode() for k, v in msg.get("headers", [])}
-
-    django_response = HttpResponse(body, status=status_code[0])
-    for key, value in headers.items():
+    django_response = HttpResponse(bytes(response_body), status=status)
+    for key, value in headers.multi_items():
         django_response[key] = value
     return django_response
+
+
+def mcp_view(request: HttpRequest) -> HttpResponse:
+    """Django view: /plugins/nautobot-app-mcp-server/mcp/.
+
+    Receives all HTTP methods (GET, POST, DELETE) and bridges them to FastMCP
+    via StreamableHTTPSessionManager.
+
+    The bridge uses asgiref.sync.async_to_sync (NOT asyncio.run) so that
+    FastMCP's event loop persists across requests and session state is preserved.
+
+    Args:
+        request: Django HttpRequest.
+
+    Returns:
+        Django HttpResponse with the MCP JSON-RPC response.
+    """
+    session_manager = get_session_manager()
+    return async_to_sync(_call_starlette_handler)(request, session_manager)
