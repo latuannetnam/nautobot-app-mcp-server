@@ -13,16 +13,26 @@ Architecture:
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 from fastmcp.server.context import Context as ToolContext
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
 
-# Module-level globals — NOT initialized at import time (PIT-03)
+# Shared FastMCP instance — ensures only one server is ever created
+_mcp_instance: FastMCP | None = None
+
+# Lazy ASGI app (Starlette) + session manager singletons
 _mcp_app: Starlette | None = None
+_mcp_session_manager: StreamableHTTPSessionManager | None = None
+
+# Double-checked locking locks
+_app_lock = threading.Lock()
+_session_lock = threading.Lock()
 
 
 def _setup_mcp_app() -> FastMCP:
@@ -113,19 +123,56 @@ def get_mcp_app() -> Starlette:
     mcp_view). Calling it at module import time causes Django ORM errors
     because no request thread context exists yet.
 
+    Thread-safe: uses double-checked locking with threading.Lock to prevent
+    duplicate FastMCP instances under concurrent Django workers.
+
     Returns:
         The FastMCP Starlette ASGI application, mounted at the /mcp/ path.
 
     Raises:
         RuntimeError: If called outside of a Django request context.
     """
-    global _mcp_app  # pylint: disable=global-statement
+    global _mcp_app, _mcp_instance  # pylint: disable=global-statement
     if _mcp_app is None:
-        mcp_instance = _setup_mcp_app()
-        _mcp_app = mcp_instance.http_app(
-            path="/mcp",
-            transport="streamable-http",
-            stateless_http=False,
-            json_response=True,
-        )
+        with _app_lock:
+            if _mcp_app is None:  # double-checked locking
+                if _mcp_instance is None:
+                    _mcp_instance = _setup_mcp_app()
+                _mcp_app = _mcp_instance.http_app(
+                    path="/mcp",
+                    transport="streamable-http",
+                    stateless_http=False,
+                    json_response=True,
+                )
     return _mcp_app
+
+
+def get_session_manager() -> StreamableHTTPSessionManager:
+    """Return the StreamableHTTPSessionManager singleton.
+
+    Lazily created alongside the FastMCP instance on first call.
+    Both share the same _mcp_instance so only one FastMCP server is created.
+
+    The session manager is the entry point for view.py's ASGI bridge:
+    it must be passed to _call_starlette_handler() inside async_to_sync
+    so that session_manager.run() can be entered (which sets
+    Server.request_context and allows tool handlers to access session state).
+
+    Returns:
+        The StreamableHTTPSessionManager instance for this process.
+
+    Raises:
+        RuntimeError: If called before Django is fully initialized.
+    """
+    global _mcp_session_manager, _mcp_instance  # pylint: disable=global-statement
+    if _mcp_session_manager is None:
+        with _session_lock:
+            if _mcp_session_manager is None:  # double-checked locking
+                if _mcp_instance is None:
+                    _mcp_instance = _setup_mcp_app()
+                _mcp_session_manager = StreamableHTTPSessionManager(
+                    app=_mcp_instance._mcp_server,
+                    json_response=True,
+                    stateless=False,
+                )
+    return _mcp_session_manager
