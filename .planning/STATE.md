@@ -53,7 +53,7 @@ Status: Executing Phase 05
 | Phase 2 | Authentication & Sessions | **Completed** | 2026-04-01 | 2026-04-01 | None |
 | Phase 3 | Core Read Tools | **Completed** | 2026-04-02 | 2026-04-02 | None |
 | Phase 4 | SKILL.md Package | **Completed** | 2026-04-02 | 2026-04-02 | None |
-| Phase 5 | MCP Server Refactor | WAVE1-SERVER done (5010d32); WAVE1-AUTH done (52c235c); WAVE1-SESSION done (a5a11f2); REFA-04+REFA-05+AUTH-01+AUTH-02+SESS-fix done | 2026-04-03 | — | None |
+| Phase 5 | MCP Server Refactor | WAVE1-SERVER done (5010d32); WAVE1-AUTH done (52c235c); WAVE1-SESSION done (a5a11f2); WAVE2-TEST-AUTH done (e8a8c66); REFA-04+REFA-05+AUTH-01+AUTH-02+AUTH-TEST-01+SESS-fix done | 2026-04-03 | — | None |
 | Phase 6 | UAT & Validation | Not Started | — | — | Phase 5 |
 
 ---
@@ -74,6 +74,7 @@ Status: Executing Phase 05
 | 0.1.0 | 2026-04-03 | Phase 5 WAVE1-SERVER executed | REFA-04+REFA-05 done; commit 5010d32; server.py thread-safe singletons + get_session_manager() |
 | 0.1.0 | 2026-04-03 | Phase 5 WAVE1-AUTH executed | AUTH-01+AUTH-02 done; commit 52c235c; auth.py user cache on ctx.request_context._cached_user |
 | 0.1.0 | 2026-04-03 | Phase 5 WAVE1-SESSION executed | SESS latent bug fix done; commit a5a11f2; session_tools.py request_context state storage replaces ServerSession dict pattern |
+| 0.1.0 | 2026-04-03 | Phase 5 WAVE2-TEST-AUTH executed | AUTH cache tests added; commit e8a8c66; test_cached_user, test_cache_stores, test_cache_miss |
 
 ---
 
