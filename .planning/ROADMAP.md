@@ -376,7 +376,7 @@ nautobot-mcp-skill/
 | AUTH-02 | `auth.py`: token key cache; hit skips DB query, miss falls through | **Completed** (WAVE1-AUTH, 52c235c) |
 | SESS-fix | `session_tools.py`: `_get_tool_state()` replaces `ctx.request_context.session` (ServerSession has no dict interface — latent bug) | **Completed** (WAVE1-SESSION, a5a11f2) |
 | TEST-01 | All existing unit tests pass after refactor | **Completed** (WAVE2-TEST-AUTH, e8a8c66) |
-| TEST-02 | Integration test: two sequential MCP requests with `Mcp-Session-Id`; second `mcp_list_tools` reflects scopes enabled in first | Pending |
+| TEST-02 | Integration test: two sequential MCP requests with `Mcp-Session-Id`; second `mcp_list_tools` reflects scopes enabled in first | **Completed** (WAVE2-TEST-INTEGRATION, a9f9d63) |
 | TEST-03 | UAT smoke tests pass | Pending |
 
 **Coverage:** 11 v1.1.0 requirements mapped to Phase 5 (10 from roadmap + SESS-fix latent bug). 100% traceability.
