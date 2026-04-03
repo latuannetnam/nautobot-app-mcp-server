@@ -2,8 +2,8 @@
 
 **Project:** Nautobot App MCP Server
 **Roadmap defined:** 2026-04-01
-**Horizon:** v1.0.0
-**Phases:** 5 (standard granularity, parallelization enabled)
+**Horizon:** v1.1.0
+**Phases:** 6 (v1.0: Phases 0–4; v1.1.0: Phase 5)
 
 ---
 
@@ -25,6 +25,7 @@ Phase 0 ──► Phase 1 ──► Phase 3
 - Phase 1 (Infrastructure) must complete before Phase 3 (Tools) can be tested end-to-end.
 - Phase 2 (Auth + Sessions) can be started as soon as Phase 1's registry exists.
 - Phase 4 (SKILL.md) depends on all previous phases being stable.
+- Phase 5 (MCP Server Refactor) can begin immediately — all patterns source-verified from django-mcp-server.
 
 ---
 
@@ -37,8 +38,9 @@ Phase 0 ──► Phase 1 ──► Phase 3
 | **Phase 2** | Authentication & Sessions | 10 (REGI-05; AUTH-01–03; SESS-01–06; TEST-06) | 1 test file | Token auth enforced, session scopes functional |
 | **Phase 3** | Core Read Tools | 15 (TOOL-01–10; PAGE-01–05; TEST-02) | 1 test file | 10 core tools + 3 meta tools operational |
 | **Phase 4** | SKILL.md Package | 3 (SKILL-01–03) | 0 new | `nautobot-mcp-skill/` pip package published |
+| **Phase 5** | MCP Server Refactor | 10 (REFA-01–05; AUTH-01–02; TEST-01–03) | 1 integration test | Session state persists; progressive disclosure works |
 
-**Total: 47 requirements, 5 phases, 4 test files**
+**Total: 57 requirements, 6 phases, 5 test files**
 
 ---
 
@@ -225,16 +227,69 @@ nautobot-mcp-skill/
 
 ---
 
+## Phase 5 — MCP Server Refactor
+
+**Purpose:** Fix the single root cause (P0) that breaks session state and progressive disclosure: `asyncio.run()` in `view.py` destroys FastMCP's event loop on every request. Replacing it with `asgiref.sync.async_to_sync` + `session_manager.run()` restores `Server.request_context` availability and in-memory session persistence. All 10 requirements map to this single phase.
+
+**Root cause (from `docs/dev/mcp-implementation-analysis.md`):**
+- `asyncio.run()` creates and destroys an event loop per request
+- FastMCP's `Server.request_context` ContextVar and in-memory session dict are cleared between requests
+- `MCPSessionState` written by `mcp_enable_tools` vanishes before the next request
+- `Server.request_context.get()` raises `LookupError` on every production call
+
+**Fix (source-verified from django-mcp-server):**
+- `async_to_sync` reuses the current thread's event loop without destroying it
+- `session_manager.run()` enters FastMCP's task group so `Server.request_context.set(ctx)` fires
+- One `StreamableHTTPSessionManager` singleton, `run()` entered once per request
+
+**Requirements:**
+
+| ID | Requirement | File |
+|---|---|---|
+| REFA-01 | `view.py` replaces `asyncio.run()` with `asgiref.sync.async_to_sync(_call_starlette_handler)(request, session_manager)` — session state now persists across requests | `mcp/view.py` |
+| REFA-02 | `view.py` calls `async with session_manager.run():` inside `_call_starlette_handler` before `handle_request()` — `Server.request_context.get()` works in all tool handlers | `mcp/view.py` |
+| REFA-03 | `view.py` ASGI scope dict built from Django request with all fields: `server` from `request.get_host()`/`get_port()`, `scheme` from `request.is_secure()`, `client` from `request.META`, `Content-Length` from headers, `path`, `query_string`, `headers`, `method`, `http_version` | `mcp/view.py` |
+| REFA-04 | `server.py` exposes `get_session_manager()` returning the `StreamableHTTPSessionManager` singleton alongside `get_mcp_app()` | `mcp/server.py` |
+| REFA-05 | `server.py` adds `threading.Lock` double-checked locking around `_mcp_app` initialization — prevents duplicate FastMCP instances under concurrent Django workers | `mcp/server.py` |
+| AUTH-01 | `auth.py` caches Nautobot user object on MCP session dict via `ctx.request_context.session["cached_user"]` — avoids DB lookup on every tool call within a batch MCP request | `mcp/auth.py` |
+| AUTH-02 | Cache key is the token key; cache hit skips DB query; cache miss falls through to existing `Token.objects.select_related("user").get()` lookup | `mcp/auth.py` |
+| TEST-01 | All existing unit tests pass after refactor (`poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests`) | — |
+| TEST-02 | Integration test sends two sequential MCP HTTP requests with `Mcp-Session-Id` header; verifies `mcp_list_tools` response on the second request reflects scopes enabled in the first (session persistence UAT) | `nautobot_app_mcp_server/mcp/tests/test_session_persistence.py` |
+| TEST-03 | UAT smoke tests pass (`docker exec ... python /source/scripts/run_mcp_uat.py`) | — |
+
+**Success Criteria:**
+
+1. `poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests` passes — all existing unit tests green after refactor
+2. Two sequential MCP HTTP POST requests sharing `Mcp-Session-Id` header: first enables a scope via `mcp_enable_tools`, second's `mcp_list_tools` response includes tools from that scope (session persistence verified)
+3. `Server.request_context.get()` succeeds inside `device_list` tool handler (no LookupError)
+4. `server.py` `get_session_manager()` returns the same singleton object across multiple calls
+5. Two concurrent first requests to `get_mcp_app()` produce one FastMCP instance (double-checked locking verified)
+6. `ctx.request_context.session["cached_user"]` is populated after first auth call; second call within same request batch hits cache (verified via mock/assertion)
+7. UAT smoke test `scripts/run_mcp_uat.py` passes end-to-end
+
+**Known pitfalls to avoid (from research/SUMMARY.md):**
+- `session_manager.run()` raises `RuntimeError` if entered twice on the same instance — one singleton, one `run()` per request
+- Starlette lifespan must wrap `session_manager.run()` — never call `http_app()` directly as a plain callable
+- `asgiref.sync.async_to_sync` must wrap an async callable (`_call_starlette_handler`)
+
+**Patterns sourced from django-mcp-server:**
+- `mcp_server/djangomcp.py`: `_call_starlette_handler`, `DjangoMCP.handle_django_request`, `StreamableHTTPSessionManager` property
+- `mcp_server/views.py`: `MCPServerStreamableHttpView`, DRF APIView, `@csrf_exempt`
+- `mcp/server/streamable_http_manager.py`: `StreamableHTTPSessionManager.__init__`, `run()`, `handle_request()`, `_has_started` guard
+- `asgiref/sync.py`: `AsyncToSync.__call__` — ThreadPoolExecutor + loop reuse
+
+---
+
 ## Requirements Traceability
 
 ### Phase 0 — Project Setup
 
 | Req ID | Requirement | Status |
 |---|---|---|
-| FOUND-01 | Add `mcp`, `fastmcp`, `asgiref` dependencies to `pyproject.toml` | Pending |
-| FOUND-03 | Use `nautobot_app_mcp_server` everywhere (not `nautobot_mcp_server`) | Pending |
-| FOUND-04 | Use `nautobot-app-mcp-server` as `base_url` | Pending |
-| TEST-05 | Coverage threshold `fail_under = 50` in `pyproject.toml` | Pending |
+| FOUND-01 | Add `mcp`, `fastmcp`, `asgiref` dependencies to `pyproject.toml` | **Completed** |
+| FOUND-03 | Use `nautobot_app_mcp_server` everywhere (not `nautobot_mcp_server`) | **Completed** |
+| FOUND-04 | Use `nautobot-app-mcp-server` as `base_url` | **Completed** |
+| TEST-05 | Coverage threshold `fail_under = 50` in `pyproject.toml` | **Completed** |
 
 ### Phase 1 — MCP Server Infrastructure
 
@@ -298,8 +353,6 @@ nautobot-mcp-skill/
 
 **Executed:** 2026-04-02 (Plans 01+02+03), commits (5b3dca1→0341f98→373c770→...)
 
-**Executed:** 2026-04-02 (Plan 01), commits `48aae6d`→`b20cb2c`
-
 ### Phase 4 — SKILL.md Package
 
 | Req ID | Requirement | Status |
@@ -307,6 +360,25 @@ nautobot-mcp-skill/
 | SKILL-01 | `nautobot-mcp-skill/` pip package | **Completed** |
 | SKILL-02 | SKILL.md with tools table, scope docs, pagination docs | **Completed** |
 | SKILL-03 | SKILL.md with investigation workflows | **Completed** |
+
+**Executed:** 2026-04-02
+
+### Phase 5 — MCP Server Refactor
+
+| Req ID | Requirement | Status |
+|---|---|---|
+| REFA-01 | `view.py`: replace `asyncio.run()` with `async_to_sync(_call_starlette_handler)` | Pending |
+| REFA-02 | `view.py`: `async with session_manager.run():` before `handle_request()` | Pending |
+| REFA-03 | `view.py`: ASGI scope dict built from Django request (server, scheme, client, path, query_string, headers, method, http_version) | Pending |
+| REFA-04 | `server.py`: `get_session_manager()` returning `StreamableHTTPSessionManager` singleton | Pending |
+| REFA-05 | `server.py`: `threading.Lock` double-checked locking on `_mcp_app` | Pending |
+| AUTH-01 | `auth.py`: `ctx.request_context.session["cached_user"]` caching | Pending |
+| AUTH-02 | `auth.py`: token key cache; hit skips DB query, miss falls through | Pending |
+| TEST-01 | All existing unit tests pass after refactor | Pending |
+| TEST-02 | Integration test: two sequential MCP requests with `Mcp-Session-Id`; second `mcp_list_tools` reflects scopes enabled in first | Pending |
+| TEST-03 | UAT smoke tests pass | Pending |
+
+**Coverage:** All 10 v1.1.0 requirements mapped to Phase 5. 100% traceability.
 
 ---
 
@@ -319,6 +391,7 @@ nautobot-mcp-skill/
 | Phase 2 | Auth tests pass; session tools respond correctly | `poetry run invoke tests` |
 | Phase 3 | All 10 core + 3 meta tools return `PaginatedResult`; coverage ≥ 50% | `poetry run invoke coverage` |
 | Phase 4 | `pip install nautobot-mcp-skill` succeeds; SKILL.md complete | `pip install ./nautobot-mcp-skill` |
+| Phase 5 | All unit tests pass; session persistence integration test passes; UAT smoke tests pass | `poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests` |
 
 ---
 
@@ -331,19 +404,26 @@ nautobot-mcp-skill/
 **Stack (resolved):**
 - `mcp ^1.26.0` — official Anthropic MCP SDK
 - `fastmcp ^3.2.0` — Prefect's FastMCP framework
-- `asgiref ^3.11.1` — ASGI bridge (`WsgiToAsgi`)
+- `asgiref ^3.11.1` — ASGI bridge (`WsgiToAsgi` + `async_to_sync`)
 - No `django-starlette` (does not exist on PyPI)
 - No `channels` or `uvicorn` (not needed for Option A)
 
-**Architecture:** Option A — FastMCP ASGI app embedded in Django via `plugin_patterns` + `WsgiToAsgi`
+**Architecture:** Option A — FastMCP ASGI app embedded in Django via `plugin_patterns` + `asgiref.wsgi.WsgiToAsgi`
+
+**Phase 5 critical fix:**
+- Replace `asyncio.run()` → `asgiref.sync.async_to_sync(_call_starlette_handler)` in `view.py`
+- Add `async with session_manager.run():` inside `_call_starlette_handler`
+- Add `get_session_manager()` + double-checked locking in `server.py`
+- Add `ctx.request_context.session["cached_user"]` caching in `auth.py`
 
 **Pagination:** Cursor-based, `base64(str(pk))` cursor, `LIMIT_DEFAULT=25`, `LIMIT_MAX=1000`, `LIMIT_SUMMARIZE=100`
 
-**Auth:** Token from MCP request context `Authorization: Token nbapikey_xxx`; `.restrict(user, action="view")` on all querysets
+**Auth:** Token from MCP request context `Authorization: Token nbapikey_xxx`; `.restrict(user, action="view")` on all querysets; user cached on MCP session dict
 
 **Session:** In-memory per `Mcp-Session-Id`; 3 scope tiers (core, dcim, ipam); core tools always enabled
 
 ---
 
 *Roadmap defined: 2026-04-01*
-*Derived from: REQUIREMENTS.md (47 requirements), research/SUMMARY.md, config.json*
+*Phase 5 added: 2026-04-03*
+*Derived from: REQUIREMENTS.md (57 requirements), research/SUMMARY.md, config.json*
