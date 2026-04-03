@@ -182,6 +182,99 @@ class ScopeHierarchyTestCase(TestCase):
         self.assertIn("ipam", state.enabled_scopes)
 
 
+class GetToolStateTestCase(TestCase):
+    """Test _get_tool_state() helper (WAVE1-SESSION fix for ServerSession latent bug)."""
+
+    def test_get_tool_state_returns_existing_state(self):
+        """If _mcp_tool_state exists on request_context, return it."""
+        from nautobot_app_mcp_server.mcp.session_tools import _get_tool_state
+
+        mock_ctx = MagicMock()
+        existing_state = {"enabled_scopes": {"dcim"}, "enabled_searches": set()}
+        mock_ctx.request_context._mcp_tool_state = existing_state
+
+        result = _get_tool_state(mock_ctx)
+        self.assertIs(result, existing_state)
+
+    def test_get_tool_state_creates_state_on_first_access(self):
+        """If _mcp_tool_state does not exist, create and attach it."""
+        from nautobot_app_mcp_server.mcp.session_tools import _get_tool_state
+
+        mock_ctx = MagicMock()
+        # No _mcp_tool_state attribute initially
+        del mock_ctx.request_context._mcp_tool_state
+        with self.assertRaises(AttributeError):
+            _ = mock_ctx.request_context._mcp_tool_state  # noqa: F841
+
+        result = _get_tool_state(mock_ctx)
+
+        # State should be created and attached
+        self.assertIsInstance(result, dict)
+        self.assertIn("enabled_scopes", result)
+        self.assertIn("enabled_searches", result)
+        self.assertEqual(mock_ctx.request_context._mcp_tool_state, result)
+
+    def test_get_tool_state_initializes_empty_sets(self):
+        """New state has empty enabled_scopes and enabled_searches sets."""
+        from nautobot_app_mcp_server.mcp.session_tools import _get_tool_state
+
+        mock_ctx = MagicMock()
+        del mock_ctx.request_context._mcp_tool_state
+
+        result = _get_tool_state(mock_ctx)
+
+        self.assertEqual(result["enabled_scopes"], set())
+        self.assertEqual(result["enabled_searches"], set())
+
+
+class ProgressiveDisclosureIntegrationTestCase(TestCase):
+    """Integration test: _list_tools_handler reads from request_context._mcp_tool_state."""
+
+    def test_list_tools_handler_uses_request_context_state(self):
+        """After WAVE1-SESSION refactor, _list_tools_handler reads from
+        ctx.request_context._mcp_tool_state (new pattern) instead of
+        ctx.request_context.session (broken ServerSession pattern).
+
+        Verified by registering a scoped tool and confirming it appears in
+        the returned tools when its scope is enabled in _mcp_tool_state.
+        """
+        from nautobot_app_mcp_server.mcp.session_tools import _list_tools_handler
+
+        # Register a known app-scoped tool
+        registry = MCPToolRegistry.get_instance()
+        registry.register(
+            ToolDefinition(
+                name="test_rctx_tool",
+                func=lambda: None,
+                description="Test tool for request_context state",
+                input_schema={"type": "object"},
+                tier="app",
+                app_label="test_app",
+                scope="test_app.rctx",
+            )
+        )
+        try:
+            # Build a mock ctx with _mcp_tool_state (new pattern)
+            mock_ctx = MagicMock()
+            mock_ctx.request_context._mcp_tool_state = {
+                "enabled_scopes": {"test_app.rctx"},
+                "enabled_searches": set(),
+            }
+
+            # Run _list_tools_handler
+            import asyncio
+
+            tools = asyncio.get_event_loop().run_until_complete(_list_tools_handler(mock_ctx))
+
+            tool_names = [t.name for t in tools]
+            # test_app.rctx scope is enabled → tool should be returned
+            self.assertIn("test_rctx_tool", tool_names)
+            # Core tools should always be present
+            self.assertIn("mcp_enable_tools", tool_names)
+        finally:
+            del registry._tools["test_rctx_tool"]  # pylint: disable=protected-access
+
+
 class MCPToolRegistrationTestCase(TestCase):
     """Verify session tools are registered correctly (SESS-03, SESS-04, SESS-05)."""
 
