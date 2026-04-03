@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import uuid
 
+import requests  # noqa: I001 — requests is a test-only dependency
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from nautobot.users.models import Token
@@ -35,14 +36,14 @@ class MCPSessionPersistenceTestCase(TestCase):
     def setUpClass(cls):
         """Create a test token for auth (requires live Nautobot DB)."""
         super().setUpClass()
-        User = get_user_model()
-        if not User.objects.filter(is_superuser=True).exists():
-            User.objects.create_superuser(
+        user_model = get_user_model()
+        if not user_model.objects.filter(is_superuser=True).exists():
+            user_model.objects.create_superuser(
                 username="mcp_test_admin",
                 email="mcp_test@test.local",
                 password="testpass",  # noqa: S106
             )
-        cls.user = User.objects.filter(is_superuser=True).first()
+        cls.user = user_model.objects.filter(is_superuser=True).first()
         cls.token = Token.objects.create(
             user=cls.user,
             key="nbapikey_test_session_persist_123",
@@ -59,9 +60,6 @@ class MCPSessionPersistenceTestCase(TestCase):
 
     def _mcp_request(self, method: str, params: dict, session_id: str | None):
         """Send an MCP JSON-RPC POST request and return the parsed response."""
-        import json
-        import requests
-
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -85,9 +83,6 @@ class MCPSessionPersistenceTestCase(TestCase):
 
     def _mcp_rpc_request(self, method: str, params: dict, session_id: str | None):
         """Send an MCP JSON-RPC request tool call (tools/call)."""
-        import json
-        import requests
-
         payload = {
             "jsonrpc": "2.0",
             "id": 2,
@@ -119,8 +114,6 @@ class MCPSessionPersistenceTestCase(TestCase):
         Step 2: Send mcp_list_tools with same session_id
         Verify: mcp_list_tools response includes dcim-scoped tools
         """
-        import json
-
         # Step 1a: Send initialize to establish the session
         init_response = self._mcp_request(
             "initialize",
@@ -176,8 +169,6 @@ class MCPSessionPersistenceTestCase(TestCase):
         Enable dcim scope with session_id=A, then call mcp_list_tools
         WITHOUT session_id — the scope should NOT be visible.
         """
-        import json
-
         # Step 1: Enable dcim with a session ID
         init_response = self._mcp_request(
             "initialize",
