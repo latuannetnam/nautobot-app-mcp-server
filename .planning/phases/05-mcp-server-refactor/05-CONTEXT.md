@@ -36,8 +36,11 @@ Phase 5 delivers: REFA-01 through REFA-05, AUTH-01, AUTH-02, TEST-01 through TES
 - **D-11:** `receive()` returns actual request body from `request.body` (not always empty as current code does)
 - **D-12:** `send()` collects `http.response.start` (status, headers) and `http.response.body` (chunks) into a `list[dict]` for assembly into `HttpResponse`
 
+### Session Storage (CRITICAL — surfaced during Phase 5 planning)
+- **D-24 (REFA-06):** `ctx.request_context.session` in tool handlers is `MCPToolSession` (an MCP SDK class, NOT a plain dict). The `MCPSessionState.from_session()` and `apply_to_session()` methods use `session.get()`/`session["key"]` syntax — this ONLY works if `MCPToolSession` implements `__getitem__`/`__setitem__`. Source-verify this by checking `mcp/server/lowlevel/servertypes.py` in the installed `.venv/`. If it does NOT have dict methods, the fix is: store state as attributes on `ctx.request_context` itself (which IS a plain Python object with dict-access), NOT on `ctx.request_context.session`.
+
 ### Auth Caching
-- **D-13:** User cached on FastMCP MCP session dict via `ctx.request_context.session["cached_user"]` — per-request-batch caching
+- **D-13:** User cached on `ctx.request_context` attribute `_cached_user` (NOT on session dict, since session may not be dict-like). Pattern: `if not hasattr(ctx.request_context, '_cached_user'): ctx.request_context._cached_user = token.user`
 - **D-14:** Cache key: token key string; cache hit returns cached user directly; cache miss falls through to `Token.objects.select_related("user").get()`
 - **D-15:** Cache populated immediately after successful token lookup, before returning user
 - **D-16:** Cache scoped to FastMCP's MCP session dict (not Django session) — survives across tool calls within same MCP request batch, cleared on MCP session expiry
