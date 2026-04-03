@@ -40,8 +40,8 @@ class MCPViewTestCase(TestCase):
 
         source = inspect.getsource(view_module)
         self.assertIn("async_to_sync", source)
-        self.assertNotIn("asyncio.run", source)  # asyncio.run is the broken pattern
-        self.assertNotIn("WsgiToAsgi", source)   # old pattern replaced
+        self.assertNotIn("import asyncio", source)  # asyncio.run is the broken pattern
+        self.assertNotIn("WsgiToAsgi", source)  # old pattern replaced
         self.assertIn("session_manager.run()", source)  # REFA-02
 
     @override_settings(
