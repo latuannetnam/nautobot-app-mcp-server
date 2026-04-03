@@ -85,9 +85,9 @@ class MCPAppFactoryTestCase(TestCase):
         from nautobot_app_mcp_server.mcp import server as server_module
 
         self._old_app = server_module._mcp_app
-        self._old_session = server_module._mcp_session_manager
+        self._old_instance = server_module._mcp_instance
         server_module._mcp_app = None
-        server_module._mcp_session_manager = None
+        server_module._mcp_instance = None
 
     def tearDown(self) -> None:
         """Restore _mcp_app after each test."""
@@ -95,7 +95,7 @@ class MCPAppFactoryTestCase(TestCase):
         from nautobot_app_mcp_server.mcp import server as server_module
 
         server_module._mcp_app = self._old_app
-        server_module._mcp_session_manager = self._old_session
+        server_module._mcp_instance = self._old_instance
 
     def test_get_mcp_app_returns_starlette_app(self):
         """get_mcp_app returns a Starlette application."""
@@ -133,26 +133,23 @@ class SessionManagerTestCase(TestCase):
     """Test get_session_manager() singleton and type."""
 
     def setUp(self) -> None:
-        """Reset singletons before each test."""
+        """Reset _mcp_instance before each test."""
         # pylint: disable=protected-access
         from nautobot_app_mcp_server.mcp import server as server_module
 
-        self._old_session = server_module._mcp_session_manager
         self._old_instance = server_module._mcp_instance
-        server_module._mcp_session_manager = None
         server_module._mcp_instance = None
 
     def tearDown(self) -> None:
-        """Restore singletons after each test."""
+        """Restore _mcp_instance after each test."""
         # pylint: disable=protected-access
         from nautobot_app_mcp_server.mcp import server as server_module
 
-        server_module._mcp_session_manager = self._old_session
         server_module._mcp_instance = self._old_instance
 
-    def test_get_session_manager_returns_singleton(self):
-        """REFA-04: get_session_manager() returns the same instance across calls."""
-        # Patch FastMCP and http_app to avoid real initialization
+    def test_get_session_manager_returns_fresh_instance(self):
+        """REFA-04: get_session_manager() returns a fresh manager per call (factory, not singleton)."""
+        # Each call creates a new StreamableHTTPSessionManager instance
         with patch(
             "nautobot_app_mcp_server.mcp.server.FastMCP.http_app",
             return_value=MagicMock(),
@@ -161,7 +158,7 @@ class SessionManagerTestCase(TestCase):
 
             mgr1 = get_session_manager()
             mgr2 = get_session_manager()
-            self.assertIs(mgr1, mgr2)
+            self.assertIsNot(mgr1, mgr2)  # Fresh instances — factory pattern
 
     def test_session_manager_type(self):
         """REFA-04: get_session_manager() returns a StreamableHTTPSessionManager instance."""

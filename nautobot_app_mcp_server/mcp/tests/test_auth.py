@@ -72,15 +72,22 @@ class GetUserFromRequestTestCase(TestCase):
             )
         user_obj = User.objects.filter(is_superuser=True).first()
 
-        token = Token.objects.create(user=user_obj, key="nbapikey_testauthtoken123")
+        token = Token.objects.create(user=user_obj, key=Token.generate_key())
 
         try:
             from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 
-            ctx = self._make_mock_ctx(
-                authorization=f"Token nbapikey_{token.key}",
-            )
-            result = get_user_from_request(ctx)
+            # Use _BareRequestContext to ensure _cached_user is absent (no MagicMock auto-create)
+            mock_request = MagicMock()
+            mock_request.headers = {"Authorization": f"Token nbapikey_{token.key}"}
+
+            class _BareRequestContext:
+                def __init__(self):
+                    self.request = mock_request
+
+            mock_ctx = MagicMock()
+            mock_ctx.request_context = _BareRequestContext()
+            result = get_user_from_request(mock_ctx)
             self.assertEqual(result, user_obj)
         finally:
             token.delete()
@@ -116,19 +123,21 @@ class GetUserFromRequestTestCase(TestCase):
 
         User = get_user_model()
         user_obj = User.objects.filter(is_superuser=True).first()
-        token = Token.objects.create(user=user_obj, key="nbapikey_testcache123")
+        token = Token.objects.create(user=user_obj, key=Token.generate_key())
 
         try:
             from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 
-            # Build a mock ctx with _cached_user already set (simulating first call)
-            mock_ctx = MagicMock()
             mock_request = MagicMock()
             mock_request.headers = {"Authorization": f"Token {token.key}"}
-            mock_ctx.request_context.request = mock_request
 
-            # Pre-populate the cache (simulating first call's cache write)
-            mock_ctx.request_context._cached_user = user_obj
+            class _BareRequestContext:
+                def __init__(self):
+                    self.request = mock_request
+                    self._cached_user = user_obj
+
+            mock_ctx = MagicMock()
+            mock_ctx.request_context = _BareRequestContext()
 
             # Call get_user_from_request — should return cached user
             result = get_user_from_request(mock_ctx)
@@ -137,7 +146,6 @@ class GetUserFromRequestTestCase(TestCase):
             self.assertEqual(result, user_obj)
 
             # Verify _cached_user was checked (no DB query occurred)
-            # We verify by checking that _cached_user on the ctx equals the returned user
             self.assertEqual(mock_ctx.request_context._cached_user, result)
         finally:
             token.delete()
@@ -153,19 +161,20 @@ class GetUserFromRequestTestCase(TestCase):
 
         User = get_user_model()
         user_obj = User.objects.filter(is_superuser=True).first()
-        token = Token.objects.create(user=user_obj, key="nbapikey_testcachestore123")
+        token = Token.objects.create(user=user_obj, key=Token.generate_key())
 
         try:
             from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 
-            # Fresh mock ctx — no _cached_user attribute
-            mock_ctx = MagicMock()
             mock_request = MagicMock()
             mock_request.headers = {"Authorization": f"Token {token.key}"}
-            mock_ctx.request_context.request = mock_request
 
-            # Ensure no cache initially
-            self.assertFalse(hasattr(mock_ctx.request_context, "_cached_user"))
+            class _BareRequestContext:
+                def __init__(self):
+                    self.request = mock_request
+
+            mock_ctx = MagicMock()
+            mock_ctx.request_context = _BareRequestContext()
 
             # First call — should do DB lookup and cache the result
             result = get_user_from_request(mock_ctx)
@@ -185,7 +194,7 @@ class GetUserFromRequestTestCase(TestCase):
     def test_cache_miss_falls_through_to_db(self):
         """AUTH-02: Cache miss (no _cached_user) falls through to DB lookup.
 
-        When ctx.request_context._cached_user is None, the function should
+        When ctx.request_context._cached_user is absent, the function should
         perform the DB lookup, cache the result, and return the user.
         """
         from django.contrib.auth import get_user_model
@@ -193,17 +202,20 @@ class GetUserFromRequestTestCase(TestCase):
 
         User = get_user_model()
         user_obj = User.objects.filter(is_superuser=True).first()
-        token = Token.objects.create(user=user_obj, key="nbapikey_testcachemiss123")
+        token = Token.objects.create(user=user_obj, key=Token.generate_key())
 
         try:
             from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 
-            # Mock ctx with _cached_user explicitly set to None
-            mock_ctx = MagicMock()
             mock_request = MagicMock()
             mock_request.headers = {"Authorization": f"Token {token.key}"}
-            mock_ctx.request_context.request = mock_request
-            mock_ctx.request_context._cached_user = None  # Explicit None = cache miss
+
+            class _BareRequestContext:
+                def __init__(self):
+                    self.request = mock_request
+
+            mock_ctx = MagicMock()
+            mock_ctx.request_context = _BareRequestContext()
 
             result = get_user_from_request(mock_ctx)
 

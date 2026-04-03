@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 from django.http import HttpRequest, HttpResponse
-from starlette.datastructures import Headers
+from django.views.decorators.csrf import csrf_exempt
 from starlette.types import Receive, Scope, Send
 
 from nautobot_app_mcp_server.mcp.server import get_session_manager
@@ -86,7 +86,12 @@ async def _call_starlette_handler(
     async def send(message: Send) -> None:
         if message["type"] == "http.response.start":
             response_started["status"] = message.get("status", 200)
-            response_started["headers"] = Headers(raw=message.get("headers", []))
+            # Decode ASGI byte headers to str for Django HttpResponse
+            raw_headers = message.get("headers", [])
+            response_started["headers"] = {
+                k.decode("latin-1") if isinstance(k, bytes) else k: v.decode("latin-1") if isinstance(v, bytes) else v
+                for k, v in raw_headers
+            }
         elif message["type"] == "http.response.body":
             response_body.extend(message.get("body", b""))
 
@@ -98,14 +103,15 @@ async def _call_starlette_handler(
 
     # Assemble Django HttpResponse from collected messages
     status = response_started.get("status", 500)
-    headers = response_started.get("headers", Headers(raw=[]))
+    headers = response_started.get("headers", {})
 
     django_response = HttpResponse(bytes(response_body), status=status)
-    for key, value in headers.multi_items():
+    for key, value in headers.items():
         django_response[key] = value
     return django_response
 
 
+@csrf_exempt
 def mcp_view(request: HttpRequest) -> HttpResponse:
     """Django view: /plugins/nautobot-app-mcp-server/mcp/.
 

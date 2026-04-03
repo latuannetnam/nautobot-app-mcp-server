@@ -26,13 +26,11 @@ if TYPE_CHECKING:
 # Shared FastMCP instance — ensures only one server is ever created
 _mcp_instance: FastMCP | None = None
 
-# Lazy ASGI app (Starlette) + session manager singletons
+# Lazy ASGI app (Starlette)
 _mcp_app: Starlette | None = None
-_mcp_session_manager: StreamableHTTPSessionManager | None = None
 
-# Double-checked locking locks
+# Lock for thread-safe app singleton creation
 _app_lock = threading.Lock()
-_session_lock = threading.Lock()
 
 
 def _setup_mcp_app() -> FastMCP:
@@ -148,31 +146,31 @@ def get_mcp_app() -> Starlette:
 
 
 def get_session_manager() -> StreamableHTTPSessionManager:
-    """Return the StreamableHTTPSessionManager singleton.
+    """Return a fresh StreamableHTTPSessionManager backed by the shared FastMCP server.
 
-    Lazily created alongside the FastMCP instance on first call.
-    Both share the same _mcp_instance so only one FastMCP server is created.
+    Each call returns a new manager instance. The underlying _mcp_instance
+    (FastMCP server) is shared so only one FastMCP server is ever created.
 
-    The session manager is the entry point for view.py's ASGI bridge:
-    it must be passed to _call_starlette_handler() inside async_to_sync
-    so that session_manager.run() can be entered (which sets
-    Server.request_context and allows tool handlers to access session state).
+    StreamableHTTPSessionManager.run() is request-scoped — it sets
+    Server.request_context and holds resources for the duration of one HTTP
+    request. It MUST NOT be reused across requests (raises RuntimeError on
+    repeated calls to run() on the same instance).
+
+    The caller (view.py) receives a fresh manager per request, ensuring each
+    call to async_to_sync(_call_starlette_handler) gets a manager that can
+    safely enter session_manager.run().
 
     Returns:
-        The StreamableHTTPSessionManager instance for this process.
+        A new StreamableHTTPSessionManager backed by the shared FastMCP server.
 
     Raises:
         RuntimeError: If called before Django is fully initialized.
     """
-    global _mcp_session_manager, _mcp_instance  # pylint: disable=global-statement
-    if _mcp_session_manager is None:
-        with _session_lock:
-            if _mcp_session_manager is None:  # double-checked locking
-                if _mcp_instance is None:
-                    _mcp_instance = _setup_mcp_app()
-                _mcp_session_manager = StreamableHTTPSessionManager(
-                    app=_mcp_instance._mcp_server,
-                    json_response=True,
-                    stateless=False,
-                )
-    return _mcp_session_manager
+    global _mcp_instance  # pylint: disable=global-statement
+    if _mcp_instance is None:
+        _mcp_instance = _setup_mcp_app()
+    return StreamableHTTPSessionManager(
+        app=_mcp_instance._mcp_server,
+        json_response=True,
+        stateless=False,
+    )
