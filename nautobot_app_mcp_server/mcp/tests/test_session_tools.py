@@ -189,9 +189,11 @@ class GetToolStateTestCase(TestCase):
         """If _mcp_tool_state exists on request_context, return it."""
         from nautobot_app_mcp_server.mcp.session_tools import _get_tool_state
 
-        mock_ctx = MagicMock()
         existing_state = {"enabled_scopes": {"dcim"}, "enabled_searches": set()}
-        mock_ctx.request_context._mcp_tool_state = existing_state
+        req_ctx = MagicMock()
+        req_ctx._mcp_tool_state = existing_state
+        mock_ctx = MagicMock()
+        mock_ctx.request_context = req_ctx
 
         result = _get_tool_state(mock_ctx)
         self.assertIs(result, existing_state)
@@ -200,11 +202,12 @@ class GetToolStateTestCase(TestCase):
         """If _mcp_tool_state does not exist, create and attach it."""
         from nautobot_app_mcp_server.mcp.session_tools import _get_tool_state
 
+        # Use a plain class so _mcp_tool_state is absent (not a MagicMock attribute)
+        class BareRequestContext:
+            """Plain object with no _mcp_tool_state attribute."""
+
         mock_ctx = MagicMock()
-        # No _mcp_tool_state attribute initially
-        del mock_ctx.request_context._mcp_tool_state
-        with self.assertRaises(AttributeError):
-            _ = mock_ctx.request_context._mcp_tool_state  # noqa: F841
+        mock_ctx.request_context = BareRequestContext()
 
         result = _get_tool_state(mock_ctx)
 
@@ -218,8 +221,11 @@ class GetToolStateTestCase(TestCase):
         """New state has empty enabled_scopes and enabled_searches sets."""
         from nautobot_app_mcp_server.mcp.session_tools import _get_tool_state
 
+        class BareRequestContext:
+            """Plain object with no _mcp_tool_state attribute."""
+
         mock_ctx = MagicMock()
-        del mock_ctx.request_context._mcp_tool_state
+        mock_ctx.request_context = BareRequestContext()
 
         result = _get_tool_state(mock_ctx)
 
