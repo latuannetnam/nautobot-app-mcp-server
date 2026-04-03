@@ -1,415 +1,423 @@
-# Pitfalls — Nautobot MCP Server
+# Pitfalls Research — Django WSGI → FastMCP ASGI Bridge
 
-> What this project commonly gets wrong. Each pitfall has warning signs, prevention, and phase mapping.
+**Domain:** Django→FastMCP bridge implementation (WSGI to ASGI)
+**Researched:** 2026-04-03
+**Confidence:** HIGH
+**Driven by:** django-mcp-server source analysis + mcp-server SDK source reading + current codebase bugs
 
 ---
 
 ## Critical Pitfalls
 
-### PIT-01: Missing MCP Dependencies in pyproject.toml
+### Pitfall 1: `asyncio.run()` Destroys FastMCP Session State on Every Request
 
-**Severity:** Critical — blocks any build
+**What goes wrong:**
+Every HTTP request calls `asyncio.run(mcp_app(scope, receive, send))`. `asyncio.run()` creates a **new event loop**, executes the coroutine, then **closes and destroys the loop** when the coroutine returns. FastMCP's `StreamableHTTPSessionManager._server_instances` dict (which holds session transports keyed by `Mcp-Session-Id`) lives inside that loop's task group. Once the loop is closed, the session store is gone.
 
-**Warning signs:** `ImportError: No module named 'fastmcp'` or `'mcp'` when running the app. `poetry run python -c "import fastmcp"` fails.
+Effect: `stateless_http=False` is set but sessions never survive between requests. The `Mcp-Session-Id` header from the MCP client is ignored because FastMCP's session manager has no existing loop to look it up in.
 
-**Prevention:** Add to `pyproject.toml` `[tool.poetry.dependencies]` before any MCP code is written:
+**Why it happens:**
+`asyncio.run()` is designed for top-level entry points (CLI scripts, `main()`). It intentionally tears down the event loop after each call. When used inside a Django view (which itself runs inside Django's request thread), each request gets a fresh loop that is immediately discarded.
 
-```toml
-mcp = "^1.26.0"          # Official MCP Python SDK (includes FastMCP server)
-fastmcp = "^3.2.0"       # fastmcp package (active, maintained by Prefect)
-asgiref = "^3.11.1"      # Django ASGI bridge (ships with Django)
-```
-
-Run `poetry lock && poetry install` immediately after adding deps.
-
-**Phase:** Phase 1a — MCP server scaffold
-
----
-
-### PIT-02: Package Name Mismatch — `nautobot_mcp_server` vs `nautobot_app_mcp_server`
-
-**Severity:** Critical — breaks all import paths, invisible until runtime
-
-**Warning signs:** `ImportError: cannot import name 'register_mcp_tool' from 'nautobot_mcp_server'` or `ModuleNotFoundError: No module named 'nautobot_mcp_server'`.
-
-**Root cause:** `DESIGN.md` uses `nautobot_mcp_server/` throughout but the actual package is `nautobot_app_mcp_server/` (matches the Poetry `name` in `pyproject.toml`).
-
-**Prevention:** Use `nautobot_app_mcp_server` consistently everywhere. Do a global find-replace on DESIGN.md before implementing.
-
-**Phase:** Phase 0 — Project setup (resolve before any code is written)
-
----
-
-### PIT-03: Creating FastMCP ASGI App at Module Import Time
-
-**Severity:** High — causes `RuntimeError: Synchronous only` or Django ORM thread errors
-
-**Warning signs:** `RuntimeError: There is no current event loop` or `sync_to_async called in wrong thread context` when the MCP server starts.
-
-**Root cause:** The `get_mcp_app()` function is called at module import time. `sync_to_async` with `thread_sensitive=True` requires an active request context — there is none at import time.
-
-**Prevention:** Lazy initialization is mandatory. `get_mcp_app()` must be called only from within the Django view (when a request context exists):
+The correct pattern (from django-mcp-server) is `asgiref.sync.async_to_sync`:
 
 ```python
-# WRONG — crashes at import
-_mcp_app = mcp.streamable_http_app(path="/mcp", ...)
+# WRONG — current implementation (view.py line 61)
+asyncio.run(mcp_app(scope, receive, send))
 
-# RIGHT — lazy, called from view
-_mcp_app: ASGIApplication | None = None
+# CORRECT — django-mcp-server pattern
+from asgiref.sync import async_to_sync
+result = async_to_sync(_call_starlette_handler)(request, self.session_manager)
+```
 
-def get_mcp_app() -> ASGIApplication:
+`async_to_sync` reuses or creates a loop on the **current thread without destroying it**, keeping the session manager alive across multiple requests on the same thread.
+
+**How to avoid:**
+Replace `asyncio.run()` with `async_to_sync` wrapping the ASGI call. However, FastMCP's `http_app()` is a Starlette app that uses `session_manager.run()` (an async context manager that must be entered once at startup). The correct architecture is:
+
+```python
+# Pattern from django-mcp-server djangomcp.py
+async def _call_starlette_handler(django_request, session_manager):
+    scope = build_asgi_scope(django_request)
+    async def receive(): ...
+    async def send(message): ...
+    async with session_manager.run():          # ← enters task group ONCE
+        await session_manager.handle_request(scope, receive, send)
+    return django_response
+
+# In view / handle_django_request:
+result = async_to_sync(_call_starlette_handler)(request, self.session_manager)
+```
+
+The key insight: `session_manager.run()` must be entered **once** when the Django process starts, not per-request. In django-mcp-server this is done by calling `session_manager.run()` inside the Starlette app's lifespan context manager (which outlives individual requests).
+
+**Warning signs:**
+- `Mcp-Session-Id` header sent by client is never recognized on subsequent requests
+- `mcp_enable_tools()` appears to work (returns success) but `mcp_list_tools()` shows nothing changed
+- FastMCP logs show "Creating new transport" on every single request
+- `StreamableHTTPSessionManager._server_instances` is always empty after each request
+
+**P0 — Addressed in:** v1.1.0 refactor (`view.py` asyncio.run → async_to_sync)
+
+---
+
+### Pitfall 2: `Server.request_context.get()` Raises `LookupError` on Every Request
+
+**What goes wrong:**
+The `_list_tools_mcp` override in `server.py` tries to access FastMCP's internal `Server.request_context` context variable:
+
+```python
+from mcp.server.lowlevel.server import Server
+req_ctx = Server.request_context.get()  # ← LookupError
+```
+
+This raises `LookupError` on **every production request** (not just in tests), because `Server.request_context` is `mcp.server.lowlevel.server.request_ctx` — a `contextvars.ContextVar` that is only set by `MCPServer._handle_request()` when processing an MCP protocol message inside the task group created by `session_manager.run()`.
+
+When using `asyncio.run()`, no persistent task group exists, so `_handle_request()` is never called in a context where `request_ctx` is set. The `LookupError` is silently caught and `session_dict` falls back to `{}`, causing `MCPSessionState.from_session({})` to produce empty state.
+
+**Why it happens:**
+`Server.request_context` is a **context variable**, not a global. It is set in `_handle_request()` (line 746 of mcp/server/lowlevel/server.py):
+
+```python
+token = request_ctx.set(RequestContext(...))
+try:
+    response = await handler(req)
+finally:
+    if token is not None:
+        request_ctx.reset(token)
+```
+
+This only happens when the server's message loop is running. With `asyncio.run()` creating a new loop per request, the message loop doesn't survive long enough to set the context variable before the `_list_tools_mcp` call happens.
+
+**How to avoid:**
+Fix #1 (replacing `asyncio.run()`) is a prerequisite. Once the session manager's task group persists across requests, `Server.request_context` is set during message processing.
+
+For code that runs *outside* the message loop (tests, management commands), access `Server.request_context` via a try/except and fall back gracefully:
+
+```python
+try:
+    ctx = Server.request_context.get()
+    session = ctx.session
+except LookupError:
+    # Outside live request — use full tool list or mock session
+    session = {}
+```
+
+The existing code already does this, but the fallback was returning empty state even in production because `asyncio.run()` meant the context was never set even during live requests.
+
+**Warning signs:**
+- `LookupError` silently caught in `_list_tools_mcp` override
+- `filtered_names_set` always empty → `_list_tools_mcp` returns empty tool list or all tools
+- `MCPSessionState.from_session({})` fires in production (detectable via logging)
+- Unit tests pass because they mock the session dict, but integration tests fail
+
+**P0 — Addressed in:** v1.1.0 refactor (fixes asyncio.run() prerequisite, then `Server.request_context` works)
+
+---
+
+### Pitfall 3: FastMCP's `StreamableHTTPSessionManager.run()` Must Be Entered Once at Startup
+
+**What goes wrong:**
+Calling `session_manager.run()` **inside** the per-request async call (as opposed to at app startup) causes a `RuntimeError`:
+
+```
+RuntimeError: StreamableHTTPSessionManager .run() can only be called once per instance.
+Create a new instance if you need to run again.
+```
+
+This happens because `StreamableHTTPSessionManager.run()` uses `_has_started` to guard against re-entry (line 104–111 of mcp/server/streamable_http_manager.py):
+
+```python
+async with self._run_lock:
+    if self._has_started:
+        raise RuntimeError(".run() can only be called once per instance")
+    self._has_started = True
+```
+
+If you enter the context manager and then try to call `handle_request()` again from outside it (or enter it twice), the error fires.
+
+**Why it happens:**
+django-mcp-server avoids this by:
+1. Creating a new `StreamableHTTPSessionManager` instance **per FastMCP server instance** (module-level singleton)
+2. Calling `session_manager.run()` inside the Starlette app's **lifespan** context manager (which is entered once at server startup, exits at shutdown)
+
+django-mcp-server creates the `session_manager` as a `@property` on `DjangoMCP`, but the Starlette app's lifespan wraps `session_manager.run()`:
+
+```python
+@asynccontextmanager
+async def lifespan(app):
+    async with server._lifespan_manager(), session_manager.run():
+        yield
+```
+
+**How to avoid:**
+Use one of these two approaches:
+
+**Option A (django-mcp-server pattern):** Keep `StreamableHTTPSessionManager` alive via Starlette lifespan. The FastMCP `http_app()` already creates a `StreamableHTTPASGIApp` wrapping a session manager, but the session manager's `run()` is entered inside Starlette's lifespan. In this pattern, the Django view doesn't call `session_manager.run()` at all — it just calls `session_manager.handle_request()` inside an existing lifespan context.
+
+**Option B (if bridging manually):** Call `session_manager.run()` once at process startup (e.g., in Django's `AppConfig.ready()`) and keep the manager instance as a module-level singleton:
+
+```python
+# At module level — manager created once at import/lazy-init
+_session_manager: StreamableHTTPSessionManager | None = None
+
+def get_session_manager() -> StreamableHTTPSessionManager:
+    global _session_manager
+    if _session_manager is None:
+        _session_manager = StreamableHTTPSessionManager(
+            app=get_mcp_server()._mcp_server,
+            json_response=True,
+            stateless=False,
+        )
+    return _session_manager
+```
+
+Then in the view, use `async_to_sync` to call `handle_request` inside an existing task group:
+
+```python
+async def _handle(scope, receive, send):
+    async with get_session_manager().run():  # ← this must survive across requests
+        await get_session_manager().handle_request(scope, receive, send)
+
+# This STILL has the problem of re-entering .run() on every call.
+# The correct approach is to keep .run() always active.
+```
+
+The **correct** approach for manual bridging: create the session manager with a **persistent task group** using `anyio.create_task_group()` started once, and route requests into it.
+
+**Warning signs:**
+- `RuntimeError: StreamableHTTPSessionManager .run() can only be called once per instance`
+- `RuntimeError: Task group is not initialized. Make sure to use run().`
+
+**P0 — Addressed in:** v1.1.0 refactor (adopt django-mcp-server pattern: lifespan-managed session manager)
+
+---
+
+### Pitfall 4: FastMCP Lifespan Must Be Wired to the ASGI App's Lifespan
+
+**What goes wrong:**
+When FastMCP's `http_app()` is used as a pure ASGI callable (without its lifespan), `StreamableHTTPSessionManager.run()` is never entered, so the task group is never created. Calling `handle_request()` then raises:
+
+```
+RuntimeError: Task group is not initialized. Make sure to use run().
+```
+
+FastMCP's `StreamableHTTPASGIApp.__call__` (http.py line 38–61) catches this and raises a helpful error:
+
+```
+FastMCP's StreamableHTTPSessionManager task group was not initialized.
+This commonly occurs when the FastMCP application's lifespan is not passed
+to the parent ASGI application (e.g., FastAPI or Starlette).
+Please ensure you are setting `lifespan=mcp_app.lifespan` in your parent
+app's constructor.
+```
+
+**Why it happens:**
+`create_streamable_http_app()` in FastMCP's http.py (line 365–368) creates a lifespan that wraps both `server._lifespan_manager()` AND `session_manager.run()`:
+
+```python
+@asynccontextmanager
+async def lifespan(app):
+    async with server._lifespan_manager(), session_manager.run():
+        yield
+```
+
+If you import and call the ASGI app directly without Starlette routing this lifespan context, the lifespan never fires.
+
+**How to avoid:**
+Never call `mcp.http_app()` ASGI app directly without Starlette's lifespan context. Always mount it as a Starlette app with its lifespan properly wired, OR use the pattern where `handle_request` is called inside an active `session_manager.run()` context (Option B above).
+
+The current `nautobot-app-mcp-server` calls `mcp_app(scope, receive, send)` directly as a plain ASGI callable — bypassing the lifespan. This is the root cause of the `asyncio.run()` problem and the session state loss.
+
+**Warning signs:**
+- `RuntimeError: Task group is not initialized` when calling `handle_request()`
+- ASGI app works once but sessions never survive
+- FastMCP logs: "StreamableHTTP session manager started" never appears
+
+**P0 — Addressed in:** v1.1.0 refactor (wire FastMCP lifespan into Django's request lifecycle)
+
+---
+
+### Pitfall 5: Thread-Unsafe `_mcp_app` Singleton
+
+**What goes wrong:**
+```python
+global _mcp_app
+if _mcp_app is None:          # ← Two threads can both pass this
+    mcp_instance = _setup_mcp_app()
+    _mcp_app = mcp_instance.http_app(...)  # ← second write wins, first leaked
+```
+
+Django's threaded workers can handle concurrent requests. Two threads hitting `get_mcp_app()` simultaneously during startup can create duplicate FastMCP instances.
+
+**How to avoid:**
+Use double-checked locking with `threading.Lock`:
+
+```python
+import threading
+_lock = threading.Lock()
+
+def get_mcp_app() -> Starlette:
     global _mcp_app
     if _mcp_app is None:
-        _mcp_app = mcp.streamable_http_app(...)
+        with _lock:
+            if _mcp_app is None:  # Second check inside lock
+                _mcp_app = _setup_mcp_app()
     return _mcp_app
 ```
 
-**Phase:** Phase 1b — MCP HTTP endpoint
+**Warning signs:**
+- Two `_setup_mcp_app()` calls in logs during startup under load
+- Resource exhaustion if `_setup_mcp_app()` opens connections
+- Intermittent test failures with duplicate registrations
+
+**P1 — Addressed in:** v1.1.0 refactor (thread lock on `get_mcp_app()`)
 
 ---
 
-### PIT-04: Wrong ASGI Bridge — `async_to_sync` vs `WsgiToAsgi`
+### Pitfall 6: `MCPSessionState` Written to Server Session But Never Survives a Request
 
-**Severity:** High — bridge doesn't work, 405 or empty responses
+**What goes wrong:**
+Even if `mcp_enable_tools` successfully writes to `session["enabled_scopes"]`, the write is made to the in-memory dict inside `StreamableHTTPSessionManager._server_instances[session_id]`. When `asyncio.run()` tears down the loop, the transport (and its session dict) are destroyed. The next request creates a new transport with a fresh empty session dict.
 
-**Warning signs:** MCP requests return 405 Method Not Allowed or empty responses. The `streamable_http_app()` returns a Starlette ASGI app (`scope/receive/send` callable) — not something you call with a Django request object.
+**Why it happens:**
+This is a compound effect of Pitfall 1. With `async_to_sync` (fixing Pitfall 1), the task group survives across requests and the session dict is persistent. With `asyncio.run()`, it is not.
 
-**Root cause:** The ASGI bridge direction is Django WSGI → FastMCP ASGI. `async_to_sync` converts async→sync (not what we need). The correct bridge is `asgiref.wsgi.WsgiToAsgi` which converts WSGI scope to ASGI scope.
+**How to avoid:**
+Fixing Pitfall 1 solves this. The session dict lives in `StreamableHTTPSessionServerTransport` (inside the task group), and with `session_manager.run()` active, it persists between requests.
 
-**Prevention:** Use `asgiref.wsgi.WsgiToAsgi`:
+django-mcp-server takes a more robust approach: it delegates session state to **Django's session framework** (cookie-based, survives restarts). This avoids in-memory session loss if the Django process restarts. For v1, in-memory sessions are acceptable, but this should be documented.
 
-```python
-from asgiref.wsgi import WsgiToAsgi
+**Warning signs:**
+- `mcp_enable_tools(scope="dcim")` returns `"Enabled: scope 'dcim'"` but immediately `mcp_list_tools` shows no `dcim` tools
+- FastMCP logs show session transport being created fresh each request
 
-def mcp_view(request):
-    app = get_mcp_app()
-    wsgi_handler = WsgiToAsgi(app)
-    # WsgiToAsgi handles the scope/receive/send conversion
-    raise NotImplementedError("Use asgiref.wsgi.WsgiToAsgi(app) in the view")
-```
-
-**Phase:** Phase 1b — MCP HTTP endpoint
+**P0 — Addressed in:** v1.1.0 refactor (session dict now survives across requests)
 
 ---
 
-### PIT-05: Using `django-starlette` (Does Not Exist)
+## Technical Debt Patterns
 
-**Severity:** High — wasted time, broken approach
-
-**Warning signs:** `pip install django-starlette` fails — this package does not exist on PyPI.
-
-**Root cause:** The approach in `DESIGN.md` references `django-starlette` which is not a real package.
-
-**Prevention:** Use `asgiref.wsgi.WsgiToAsgi` (from the `asgiref` package already included with Django) to bridge Django → Starlette ASGI. No extra package needed.
-
-**Phase:** Phase 1b — MCP HTTP endpoint
-
----
-
-### PIT-06: Wrong Thread Mode for `sync_to_async`
-
-**Severity:** High — Django connection pool exhaustion, `connection already closed` errors
-
-**Warning signs:** Sporadic `connection already closed` errors in tool handlers. Memory growth over time.
-
-**Root cause:** Using `sync_to_async(fn)` without `thread_sensitive=True`. Default thread mode may use a different thread per call, losing Django's thread-local connection pool.
-
-**Prevention:** Always use `thread_sensitive=True` for Django ORM calls:
-
-```python
-from asgiref.sync import sync_to_async
-
-_get_devices = sync_to_async(
-    _sync_device_list,
-    thread_sensitive=True,  # Reuses Django's thread-local connection pool
-)
-```
-
-**Phase:** Phase 3 — Core tools
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| `asyncio.run()` in view | Simple, no external deps | Destroys all session state per request | Never — hard requirement to fix |
+| In-memory session storage | No Redis needed | Sessions lost on restart or multi-worker | Only for single-worker dev; document |
+| Hardcoded ASGI `server` tuple | Works in dev | Breaks behind reverse proxies or custom ports | Always fix — 2-line change |
+| No request-level user cache | Simple code | N token DB queries per batch MCP request | Only for very low traffic; fix with `functools.lru_cache` on thread-local key |
+| Mock ToolContext in `_list_tools_mcp` | Tests pass without real session | Test coverage gap for session logic | Only as supplement to integration tests |
+| Single `StreamableHTTPSessionManager` reused across requests | Simple architecture | All sessions in one manager — if it crashes, all die | Acceptable for single-process; document |
 
 ---
 
-### PIT-07: Pagination Counts After Slicing (Auto-Summarize Never Fires)
+## Integration Gotchas
 
-**Severity:** High — auto-summarize never triggers, memory issues on large datasets
+### Integration: Django ORM ↔ FastMCP Async Handlers
 
-**Warning signs:** `device_list(limit=1000)` on a 10,000-device database returns all 1000 items without a `summary` field, even though it should summarize at 100.
+| Common Mistake | Correct Approach |
+|---------------|-----------------|
+| Calling Django ORM directly from async tool handler without `sync_to_async` | Wrap ORM calls: `sync_to_async(get_user, thread_sensitive=True)(token_key)` |
+| `sync_to_async` without `thread_sensitive=True` | Use `thread_sensitive=True` to reuse Django's thread-local connection pool |
+| `async_to_sync` wrapping a sync Django ORM call inside an already-async handler | Never nest `async_to_sync` inside `sync_to_async` — use `await` all the way through |
+| Calling ORM in FastMCP lifespan/startup hooks | ORM must only be called after Django `ready()` signal fires; use lazy init for server |
+| QuerySet iteration in async context without wrapping | Wrap in `sync_to_async(list, thread_sensitive=True)(queryset)` |
 
-**Root cause:** The `paginate_queryset` implementation in `DESIGN.md` slices first, then counts the sliced result. Auto-summarize fires based on the sliced count, not the original count.
+### Integration: FastMCP Session Dict ↔ Django Session Framework
 
-**Prevention:** Count BEFORE slicing:
+| Common Mistake | Correct Approach |
+|---------------|-----------------|
+| Storing session state only in FastMCP in-memory dict (lost on restart) | For persistence: mirror to Django sessions; for v1: document in-memory limitation |
+| Relying on `Mcp-Session-Id` matching Django session key | They are independent — FastMCP generates its own UUID session IDs |
+| Calling `session.save()` after writing FastMCP session state | Only needed if delegating to Django sessions; FastMCP manages its own dict |
+| Session state read/write race in concurrent tool calls | FastMCP's `ServerSession` dict operations are synchronous within the async task; no extra locking needed |
 
-```python
-# WRONG (from DESIGN.md):
-items = list(qs[:limit + 1])
-has_next = len(items) > limit  # counts AFTER slice
-if len(items) > LIMIT_SUMMARIZE:  # always false for small limits
-    summary = {...}
+### Integration: `Server.request_context` ↔ Django Request Lifecycle
 
-# RIGHT:
-raw_items = list(qs[:limit + 1])
-has_next = len(raw_items) > limit
-items = raw_items[:limit]
-if len(raw_items) > LIMIT_SUMMARIZE:  # counts BEFORE slice
-    full_count = qs.count()  # accurate count
-    summary = {"total_count": full_count, ...}
-```
-
-**Phase:** Phase 3 — Core tools (pagination module)
-
----
-
-### PIT-08: Option B (Separate Worker) as Primary Approach — Anti-Feature
-
-**Severity:** High — violates core value proposition, requires Redis, complex deployment
-
-**Warning signs:** Running `uvicorn nautobot_mcp_server.mcp.server:app --port 9001` as a separate process. Redis session errors.
-
-**Root cause:** DESIGN.md lists Option B (separate worker) as simpler, but it requires Redis for session state sharing, creates a separate process that must authenticate against Nautobot separately, and contradicts the "embedded in Django" value proposition.
-
-**Prevention:** Option A (embedded via Django URL route with `WsgiToAsgi`) is the correct approach:
-- Zero extra ports or firewall rules
-- Shares Django's ORM directly (no auth sync needed)
-- FastMCP session state is in-memory (acceptable for v1)
-
-Option B is only needed if Nautobot is deployed with multiple gunicorn workers AND sessions are lost between workers — defer to v2 if this becomes a problem.
-
-**Phase:** Phase 1b — MCP HTTP endpoint
+| Common Mistake | Correct Approach |
+|---------------|-----------------|
+| Accessing `Server.request_context` outside `session_manager.run()` task group | Always access inside active lifespan; raise `LookupError` gracefully outside |
+| Accessing `Server.request_context` in FastMCP tool handler before handler is called | Context is set in `_handle_request()` before handler dispatch — available during tool execution |
+| Overriding `_list_tools_mcp` and accessing `Server.request_context` | Safe if called from within `session_manager.run()`; catches `LookupError` for test/fallback paths |
+| Passing Django `HttpRequest` through `Server.request_context` | Use `context.request_context.request` (MCP SDK request) — not Django `HttpRequest` |
 
 ---
 
-## High-Severity Pitfalls
+## Performance Traps
 
-### PIT-09: `base_url` Mismatch — `mcp-server` vs `nautobot-mcp-server`
-
-**Severity:** High — URL routing mismatch, 404 on MCP endpoint
-
-**Warning signs:** `curl http://localhost:8080/plugins/nautobot-mcp-server/mcp/` returns 404.
-
-**Root cause:** `__init__.py` sets `base_url = "mcp-server"` → mounted at `/plugins/mcp-server/`. DESIGN.md references `/plugins/nautobot-mcp-server/mcp/`. These must match.
-
-**Prevention:** Decide on one. `base_url = "mcp-server"` (from `__init__.py`) is the authoritative value. Update DESIGN.md to use `/plugins/mcp-server/mcp/`.
-
-**Phase:** Phase 0 — Project setup
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Token lookup without caching | N DB queries per MCP request (one per tool call in batch) | `functools.lru_cache` on token key OR thread-local cache set at request entry | Batch operations with 5+ tool calls |
+| `MCPToolRegistry.fuzzy_search()` O(n) per term | Linear scan of all tools per fuzzy term | O(n) is fine for <100 tools; add inverted index if registry grows | 500+ tools with 10+ fuzzy terms |
+| Session dict rebuilt from scratch per `mcp_list_tools` call | Repeated `MCPSessionState.from_session()` deserialization | Session dict operations are dict reads — negligible overhead | Not a concern at expected scale |
+| `_list_tools_mcp` override fetches all tools then filters | Two full tool scans (registry + filter) | Acceptable at <100 tools; defer optimization until measured | 1000+ tools with complex filtering |
 
 ---
 
-### PIT-10: Anonymous Auth Returns Empty — Can Hide Misconfiguration
+## Security Mistakes
 
-**Severity:** High — silent failures, misconfigured tokens return no data with no error
-
-**Warning signs:** Requests with invalid tokens return `{"items": []}` with HTTP 200 — no indication that auth failed.
-
-**Prevention:** Log a warning when AnonymousUser is detected:
-
-```python
-def get_user_from_request(request) -> User | AnonymousUser:
-    if auth_header.startswith("Token "):
-        token_key = auth_header[6:]
-        try:
-            token = Token.objects.select_related("user").get(key=token_key)
-            return token.user
-        except Token.DoesNotExist:
-            logger.warning("MCP: Invalid token attempted")
-            return AnonymousUser()
-    ...
-    if not request.user.is_authenticated:
-        logger.debug("MCP: Anonymous request")
-    return request.user or AnonymousUser()
-```
-
-Add a verification test: valid token → data, invalid token → empty, no token → empty + warning log.
-
-**Phase:** Phase 2 — Auth layer
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Anonymous user returning data silently | Data leakage if auth misconfigured | Log warning when `AnonymousUser` used; fail-closed for sensitive scopes |
+| Auth token logged in plaintext | Token exposure in logs | Never log `Authorization` header value; log only prefix (`Token abc...`) |
+| Token lookup without rate limiting | Token enumeration via repeated requests | Nautobot's Token model is already DB-backed; add Django throttle class if needed |
+| `MCPSessionState` mutable by client | Malicious client manipulates session | Session state only controls tool visibility (read operations); write tools are out of scope for v1 |
+| No CORS control on MCP endpoint | Unauthorized cross-origin calls | MCP endpoint is behind Nautobot's auth; add explicit origin allowlist if exposed externally |
 
 ---
 
-### PIT-11: Multi-Worker Deployment — In-Memory Session Loss
+## "Looks Done But Isn't" Checklist
 
-**Severity:** High — sessions lost between gunicorn workers
-
-**Warning signs:** First request works, second request (different worker) loses enabled scopes. `mcp_enable_tools` works on first call, then tools disappear.
-
-**Root cause:** FastMCP's session state is stored in-memory on the worker that handled the first request. Gunicorn workers are separate processes — session state is not shared.
-
-**Known deferred item:** DESIGN.md explicitly defers Redis session backend to v2. For v1, document this as a known limitation. Single-worker deployments (dev, `runserver`) are unaffected.
-
-**Prevention:** For v1, use a single gunicorn worker or note in docs that multi-worker requires v2 Redis session backend. Add a startup warning:
-
-```python
-import os
-if os.environ.get("GUNICORN_WORKERS", "1") != "1":
-    logger.warning(
-        "MCP session state is in-memory. "
-        "Multi-worker deployments require Redis session backend (v2)."
-    )
-```
-
-**Phase:** Phase 5 — Production hardening
+- [ ] **`asyncio.run()` replaced:** `async_to_sync` is used, but verify `session_manager.run()` is called once at startup (not per-request)
+- [ ] **`Server.request_context` works:** `LookupError` no longer fires in production; integration test verifies session dict survives across two sequential MCP requests
+- [ ] **Session state persists:** `mcp_enable_tools(scope="dcim")` followed by `mcp_list_tools` shows `dcim` tools — verified by integration test
+- [ ] **`StreamableHTTPSessionManager.run()` entered once:** Check that `session_manager.run()` is inside a lifespan context manager (Django startup or Starlette app lifespan), not inside per-request code
+- [ ] **Thread-safe singleton:** `get_mcp_app()` uses double-checked locking; two concurrent startup requests don't create duplicate instances
+- [ ] **ASGI scope server address:** `request.get_host()` / `request.get_port()` used, not hardcoded `("127.0.0.1", 8080)`
+- [ ] **User token cached per request:** Auth layer caches token→user lookup using thread-local or request-level cache, not per-tool
+- [ ] **Django ORM sync calls wrapped:** All ORM calls in tool handlers go through `sync_to_async(..., thread_sensitive=True)`
+- [ ] **Session dict survives process restart:** If persistence is required: delegate to Django sessions; if not: document as known limitation
 
 ---
 
-### PIT-12: `post_migrate` Signal Registration Order
+## Recovery Strategies
 
-**Severity:** High — tools from third-party apps not registered, `register_mcp_tool()` calls fail silently
-
-**Warning signs:** Third-party app tools (e.g., `netnam_cms_core.juniper.*`) don't appear in `mcp_list_tools()`.
-
-**Root cause:** `post_migrate` fires per app when that app's migrations complete. If a third-party app's `ready()` calls `register_mcp_tool()` before the MCP server's `post_migrate` fires, the tool is registered to the singleton but then... actually the order in `DESIGN.md` is correct: `post_migrate` fires AFTER all `ready()` hooks. But the design uses `post_migrate` from within `ready()` — this means `post_migrate` connects itself at `ready()` time, and `post_migrate` fires when migrations run (which includes the MCP server's own migrations).
-
-**Prevention:** Use a two-step connect:
-```python
-def ready(self):
-    post_migrate.connect(self._on_post_migrate, sender=self)
-
-@staticmethod
-def _on_post_migrate(app_config, **kwargs):
-    if app_config.name == "nautobot_app_mcp_server":
-        # Only run for THIS app's migrations
-        MCPToolRegistry.get_instance().register_core_tools()
-```
-
-**Phase:** Phase 1c — Nautobot plugin integration
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| `asyncio.run()` session destruction | LOW | Replace with `async_to_sync` + lifespan-managed session manager; no data migration needed |
+| `Server.request_context` LookupError | LOW | Fixes automatically once `asyncio.run()` is fixed; add defensive `LookupError` catch for test compatibility |
+| Session manager `.run()` re-entry | LOW | Create `StreamableHTTPSessionManager` once as module-level singleton; never recreate per request |
+| Thread-unsafe singleton | LOW | Add `threading.Lock` around `_mcp_app` creation; no other changes needed |
+| In-memory sessions lost on restart | MEDIUM | Implement Django session delegation (django-mcp-server pattern); requires session schema migration if sharing with Django sessions |
+| Auth token lookup uncached | LOW | Add `functools.lru_cache(maxsize=128)` on token→user lookup function keyed by token key |
 
 ---
 
-### PIT-13: `@mcp.list_tools()` Return Type for Progressive Disclosure
+## Pitfall-to-Phase Mapping
 
-**Severity:** High — wrong approach, breaks MCP protocol
-
-**Warning signs:** Tools disappear from the MCP manifest entirely when scopes change.
-
-**Root cause:** The `list_tools()` MCP protocol handler should return ALL tools that COULD be called (not just the currently enabled ones). Claude Code can call any tool by name regardless of manifest. The session state should filter WHICH tools Claude is AWARE of, not WHICH can be called.
-
-**Prevention:** Override `@mcp.list_tools()` to return currently active tools, but document that tools can always be called by name. The registry is the source of truth for execution, the manifest controls discoverability.
-
-**Phase:** Phase 3 — Core tools (session management)
-
----
-
-### PIT-14: `search_by_name` Complexity — Multi-Model Query Without Ranking
-
-**Severity:** High — slow, returns unordered results
-
-**Warning signs:** `search_by_name("core")` returns 50+ mixed results in arbitrary order. No indication of relevance.
-
-**Root cause:** The DESIGN.md `search_by_name` is listed as a single core tool but is actually a multi-model search with ranking. Implementing it as a simple `Q(name__icontains=query)` across multiple models returns unordered results.
-
-**Prevention:** Implement `search_by_name` with:
-1. Per-model name searches using `Q(name__icontains=query) | Q(display_name__icontains=query)`
-2. Results ranked by exact match > startswith > contains
-3. Return `{"model": "device", "name": "...", "relevance": "high"}` in results
-4. Consider limiting to top 25 results to avoid context overflow
-
-**Phase:** Phase 4 — Additional tools
+| Pitfall | Milestone | Verification |
+|---------|-----------|---------------|
+| P1: `asyncio.run()` destroys session state | v1.1.0 — P0 fix | Integration test: two sequential MCP requests with `Mcp-Session-Id`; second request recognizes session |
+| P2: `Server.request_context` LookupError | v1.1.0 — P0 fix | Unit test mocks session dict; integration test verifies real context access |
+| P3: `session_manager.run()` per-request | v1.1.0 — P0 fix | Verify "StreamableHTTP session manager started" appears once in logs at startup |
+| P4: Lifespan not wired | v1.1.0 — P0 fix | No `RuntimeError: Task group is not initialized` in logs under load |
+| P5: Thread-unsafe singleton | v1.1.0 — P1 fix | Concurrent startup under load test; no duplicate `_setup_mcp_app()` calls |
+| P6: Session state never survives | v1.1.0 — P0 fix | Covered by P1 verification |
+| P1: Auth token lookup uncached | v1.1.0 — P1 fix | Django debug toolbar or query count assertion: N queries for N tool calls → 1 query |
+| P1: ASGI scope server hardcoded | v1.1.0 — P1 fix | Verify `request.get_host()` value appears in ASGI scope |
 
 ---
 
-## Medium-Severity Pitfalls
+## Sources
 
-### PIT-15: CI Passes on Empty Tests — False Confidence
-
-**Severity:** Medium — PRs merged without actual coverage
-
-**Warning signs:** `poetry run invoke tests` passes but `coverage` shows 0% coverage.
-
-**Root cause:** `nautobot_app_mcp_server/tests/__init__.py` is empty. CI runs the test suite which exercises nothing.
-
-**Prevention:** Phase 1d must include tests for the scaffold (app config loads, URL route resolves). Add coverage thresholds to `pyproject.toml`:
-
-```toml
-[tool.coverage.report]
-fail_under = 50  # Enforce minimum coverage
-```
-
-Increase threshold as more code is written.
-
-**Phase:** Phase 1d — Testing scaffold
+- [django-mcp-server djangomcp.py](https://raw.githubusercontent.com/gts360/django-mcp-server/main/mcp_server/djangomcp.py) — `async_to_sync` WSGI→ASGI bridge, `StreamableHTTPSessionManager` lifespan wiring, Django session delegation
+- [django-mcp-server views.py](https://raw.githubusercontent.com/gts360/django-mcp-server/main/mcp_server/views.py) — `MCPServerStreamableHttpView` DRF APIView pattern
+- [mcp/server/lowlevel/server.py](file://.venv/lib/python3.12/site-packages/mcp/server/lowlevel/server.py) — `Server.request_context` contextvar, `_handle_request()` context setup (lines 746–779)
+- [mcp/server/streamable_http_manager.py](file://.venv/lib/python3.12/site-packages/mcp/server/streamable_http_manager.py) — `StreamableHTTPSessionManager.run()` once-per-instance guard, stateful vs stateless request handling, session dict per `Mcp-Session-Id`
+- [fastmcp/server/http.py](file://.venv/lib/python3.12/site-packages/fastmcp/server/http.py) — `StreamableHTTPASGIApp`, `RequestContextMiddleware`, `create_streamable_http_app` lifespan wiring (lines 365–368), `RuntimeError: Task group is not initialized` helpful message
+- [fastmcp/server/mixins/transport.py](file://.venv/lib/python3.12/site-packages/fastmcp/server/mixins/transport.py) — `http_app()` and `run_http_async()` entry points
+- `docs/dev/mcp-implementation-analysis.md` — current implementation analysis, bug inventory, P0/P1 priority ranking
+- `nautobot_app_mcp_server/mcp/view.py` — current broken implementation (P0: `asyncio.run()`)
+- `nautobot_app_mcp_server/mcp/server.py` — current broken implementation (P0: `Server.request_context.get()` → LookupError, P1: thread-unsafe singleton)
 
 ---
-
-### PIT-16: Auth Token Extracted from Wrong Source
-
-**Severity:** Medium — tokens not recognized, anonymous fallback
-
-**Warning signs:** Valid Nautobot API token in `Authorization` header → AnonymousUser.
-
-**Root cause:** In FastMCP, the raw HTTP headers come from `ctx.request_context.request` (MCP SDK request object, not Django `HttpRequest`). `request.headers.get("Authorization")` on the MCP request works differently than on Django's request.
-
-**Prevention:** In tool handlers, extract auth from the FastMCP request context:
-```python
-from mcp.server import Context
-
-@mcp.tool()
-async def device_list(ctx: Context, name: str | None = None, limit: int = 25):
-    # MCP request object, not Django HttpRequest
-    mcp_request = ctx.request_context.request
-    auth_header = mcp_request.headers.get("Authorization", "")
-    ...
-```
-
-**Phase:** Phase 2 — Auth layer
-
----
-
-### PIT-17: `cursor` Encoding for Non-String PKs
-
-**Severity:** Medium — `base64.b64decode` fails on UUID primary keys
-
-**Warning signs:** `cursor` parameter causes `UnicodeDecodeError` on devices with UUID PKs.
-
-**Root cause:** DESIGN.md encodes cursor as `base64(pk)` where `pk` is a UUID string. But `str(uuid_obj)` produces a human-readable UUID like `"a3f8b2c0-..."`. `base64.b64decode` returns bytes, and `.decode()` assumes UTF-8 which works. However, if PK is stored as a UUID object (not string) the encoding could be inconsistent.
-
-**Prevention:** Always convert to string explicitly before encoding:
-```python
-def _encode_cursor(pk) -> str:
-    return base64.b64encode(str(pk).encode("utf-8")).decode("ascii")
-
-def _decode_cursor(cursor: str) -> str:
-    return base64.b64decode(cursor.encode("ascii")).decode("utf-8")
-```
-
-And when using in filter:
-```python
-pk_field = qs.model._meta.pk
-if isinstance(last_pk, str):
-    last_pk = last_pk  # use as-is for UUID/string PKs
-qs = qs.filter(**{f"{pk_field.name}__gt": last_pk})
-```
-
-**Phase:** Phase 3 — Core tools (pagination)
-
----
-
-### PIT-18: Pylint Score < 10.00 — PR Blocked
-
-**Severity:** Medium — PRs rejected in CI
-
-**Warning signs:** `poetry run invoke pylint` reports score below 10.00.
-
-**Prevention:** Run `poetry run invoke pylint` before every commit. Keep all code clean. When adding new code:
-- Use `from __future__ import annotations` to avoid forward-reference warnings
-- Use `# type: ignore` only for third-party stubs
-- Never skip pylint with `--disable`
-
-**Phase:** All phases
-
----
-
-## Quality Gates Summary
-
-| Pitfall | Gate | How to Verify |
-|---|---|---|
-| PIT-01 | Dependencies added | `poetry run python -c "import fastmcp, mcp"` succeeds |
-| PIT-02 | Package name consistent | `poetry run python -c "import nautobot_app_mcp_server"` succeeds |
-| PIT-03 | Lazy init | `poetry run python -c "from nautobot_app_mcp_server.mcp import server"` succeeds without DB |
-| PIT-04 | ASGI bridge works | `curl -X POST http://localhost:8080/plugins/mcp-server/mcp/` → MCP JSON-RPC response |
-| PIT-06 | Thread sensitivity | Load test with 100 concurrent requests → no `connection already closed` |
-| PIT-07 | Auto-summarize fires | `device_list(limit=100)` on 500-device DB → `summary` field present |
-| PIT-10 | Auth warning logged | Request with invalid token → warning in logs + empty results |
-| PIT-15 | Coverage > 0 | `coverage report` shows >50% on `nautobot_app_mcp_server/` |
-| PIT-18 | Pylint 10.00 | `poetry run invoke pylint` → 10.00/10 |
-
----
-
-*Last updated: 2026-04-01 after research synthesis*
+*Pitfalls research for: Django WSGI → FastMCP ASGI bridge*
+*Researched: 2026-04-03*
