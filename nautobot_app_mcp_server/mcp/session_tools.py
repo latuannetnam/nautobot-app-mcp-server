@@ -6,9 +6,12 @@ Exports 4 symbols for server.py registration:
     mcp_list_tools    — factory: register as FastMCP tool + MCPToolRegistry
     _list_tools_handler — coroutine: progressive disclosure logic
 
-Session state lives in FastMCP's session dict (D-19):
-    session["enabled_scopes"]  — set[str]: enabled scope strings
-    session["enabled_searches"] — set[str]: fuzzy search terms
+Session state lives in FastMCP's RequestContext dataclass (D-24):
+    ctx.request_context._mcp_tool_state["enabled_scopes"]  — set[str]
+    ctx.request_context._mcp_tool_state["enabled_searches"] — set[str]
+
+This replaces the old session["enabled_scopes"] pattern, which relied on
+ServerSession being dict-like (it is not — this was a latent bug).
 
 Scope hierarchy (D-21): enabling "dcim" activates "dcim.interface",
 "dcim.device", etc. via MCPToolRegistry.get_by_scope() startswith matching.
@@ -35,6 +38,37 @@ if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 from nautobot_app_mcp_server.mcp import register_mcp_tool
+
+# -------------------------------------------------------------------
+# Request-context-based state storage (replaces session dict pattern)
+# -------------------------------------------------------------------
+# FastMCP's ServerSession has no dict-like interface (no get/setitem).
+# State is stored as a dict attribute on the RequestContext dataclass.
+# These helpers safely get/set the state, falling back to empty on first access.
+
+
+def _get_tool_state(ctx: ToolContext) -> dict:
+    """Get the MCP tool state dict from request_context, creating if needed.
+
+    The state dict is stored as _mcp_tool_state on the RequestContext object.
+    This avoids depending on ServerSession having dict-like methods.
+    """
+    req_ctx = ctx.request_context
+    state = getattr(req_ctx, "_mcp_tool_state", None)
+    if state is None:
+        state = {"enabled_scopes": set(), "enabled_searches": set()}
+        req_ctx._mcp_tool_state = state  # Monkey-patch dataclass
+    return state
+
+
+def _make_session_wrapper(state: dict) -> dict:
+    """Build a dict-like wrapper that reads/writes the state dict.
+
+    Returns a plain dict that _list_tools_handler, _mcp_enable_tools_impl,
+    etc. can use with the existing MCPSessionState.from_session() and
+    apply_to_session() methods without modification.
+    """
+    return state
 
 # -------------------------------------------------------------------
 # MCPSessionState — thin wrapper over FastMCP session dict (D-26)
@@ -108,8 +142,8 @@ async def _list_tools_handler(
     """
     from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 
-    session = ctx.request_context.session
-    state = MCPSessionState.from_session(session)
+    tool_state = _get_tool_state(ctx)
+    state = MCPSessionState.from_session(tool_state)
 
     registry = MCPToolRegistry.get_instance()
 
@@ -177,8 +211,8 @@ async def _mcp_enable_tools_impl(  # noqa: ANN202
     if scope is None and search is None:
         return "Provide at least one of: scope= or search="
 
-    session = ctx.request_context.session
-    state = MCPSessionState.from_session(session)
+    tool_state = _get_tool_state(ctx)
+    state = MCPSessionState.from_session(tool_state)
     parts: list[str] = []
 
     if scope is not None:
@@ -189,7 +223,10 @@ async def _mcp_enable_tools_impl(  # noqa: ANN202
         state.enabled_searches.add(search)
         parts.append(f"search '{search}'")
 
-    state.apply_to_session(session)
+    # State already stored in tool_state by reference; no apply needed.
+    # Belt-and-suspenders: write back to ensure persistence.
+    tool_state["enabled_scopes"] = state.enabled_scopes
+    tool_state["enabled_searches"] = state.enabled_searches
     return f"Enabled: {', '.join(parts)}"
 
 
@@ -238,19 +275,23 @@ async def _mcp_disable_tools_impl(  # noqa: ANN202
     Returns:
         Human-readable summary of what was disabled.
     """
-    session = ctx.request_context.session
-    state = MCPSessionState.from_session(session)
+    tool_state = _get_tool_state(ctx)
+    state = MCPSessionState.from_session(tool_state)
 
     if scope is None:
         state.enabled_scopes.clear()
         state.enabled_searches.clear()
-        state.apply_to_session(session)
+        # State already stored in tool_state by reference
+        tool_state["enabled_scopes"] = state.enabled_scopes
+        tool_state["enabled_searches"] = state.enabled_searches
         return "Disabled all non-core tools."
 
     # Find all scopes that start with this prefix (children included)
     to_remove = {s for s in state.enabled_scopes if s == scope or s.startswith(f"{scope}.")}
     state.enabled_scopes -= to_remove
-    state.apply_to_session(session)
+    # State already stored in tool_state by reference
+    tool_state["enabled_scopes"] = state.enabled_scopes
+    tool_state["enabled_searches"] = state.enabled_searches
     return f"Disabled scope '{scope}' and {len(to_remove)} child scope(s)."
 
 
@@ -290,8 +331,8 @@ async def _mcp_list_tools_impl(ctx: ToolContext) -> str:  # noqa: ANN202
     """
     from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry
 
-    session = ctx.request_context.session
-    state = MCPSessionState.from_session(session)
+    tool_state = _get_tool_state(ctx)
+    state = MCPSessionState.from_session(tool_state)
     registry = MCPToolRegistry.get_instance()
 
     core = registry.get_core_tools()
