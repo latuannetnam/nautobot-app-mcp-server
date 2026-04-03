@@ -78,4 +78,35 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 
 ---
 
-*Last updated: 2026-04-02 after Phase 03 completion*
+## Current Milestone: v1.1.0 MCP Server Refactor
+
+**Goal:** Research django-mcp-server deeply, then refactor the MCP server to fix critical session state and progressive disclosure bugs identified in `docs/dev/mcp-implementation-analysis.md`.
+
+**Target features:**
+- Fix P0: Replace `asyncio.run()` with `async_to_sync` in `view.py` — session state broken
+- Fix P0: Fix progressive disclosure session context access (`Server.request_context.get()` LookupError)
+- Fix P1: Thread-safe singleton locking for `get_mcp_app()`
+- Fix P1: User token lookup caching in auth layer
+- Fix P1: Derive server address from `request.get_host()` in ASGI scope
+- UAT coverage: update UAT tests, ensure all unit tests pass
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd:transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd:complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
+---
+
+*Last updated: 2026-04-03 after v1.1.0 milestone started*
