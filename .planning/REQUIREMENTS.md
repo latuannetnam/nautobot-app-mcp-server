@@ -1,162 +1,93 @@
-# Requirements: Nautobot App MCP Server
+# Requirements: nautobot-app-mcp-server
 
-**Defined:** 2026-04-01
+**Defined:** 2026-04-03
 **Core Value:** AI agents can query Nautobot network inventory data via MCP tools with full Nautobot permission enforcement, zero extra network hops, and progressive tool discovery.
 
 ---
 
 ## v1 Requirements
 
-### Foundation
+Requirements for v1.1.0 milestone — MCP server refactor. All P0 issues share one root cause (`asyncio.run()`); fixing it restores session state and progressive disclosure.
 
-- [ ] **FOUND-01**: Add `mcp`, `fastmcp`, and `asgiref` dependencies to `pyproject.toml`
-- [ ] **FOUND-02**: Create `nautobot_app_mcp_server/mcp/` package structure
-- [ ] **FOUND-03**: Resolve package name mismatch — use `nautobot_app_mcp_server` everywhere (not `nautobot_mcp_server`)
-- [ ] **FOUND-04**: Resolve `base_url` — use `nautobot-app-mcp-server` (matches package name convention), endpoint at `/plugins/nautobot-app-mcp-server/mcp/`
-- [ ] **FOUND-05**: Fix `NotImplementedError` in DESIGN.md Option A — implement ASGI bridge via `asgiref.wsgi.WsgiToAsgi`
+### Bridge Refactor
 
-### MCP Server Infrastructure
+- [ ] **REFA-01**: `view.py` replaces `asyncio.run()` with `asgiref.sync.async_to_sync(_call_starlette_handler)(request, session_manager)` — session state now persists across requests
+- [ ] **REFA-02**: `view.py` calls `async with session_manager.run():` inside `_call_starlette_handler` before `handle_request()` — `Server.request_context.get()` works in all tool handlers
+- [ ] **REFA-03**: `view.py` ASGI scope dict built from Django request with all fields: `server` from `request.get_host()`/`get_port()`, `scheme` from `request.is_secure()`, `client` from `request.META`, `Content-Length` from headers, `path`, `query_string`, `headers`, `method`, `http_version`
+- [ ] **REFA-04**: `server.py` exposes `get_session_manager()` returning the `StreamableHTTPSessionManager` singleton alongside `get_mcp_app()`
+- [ ] **REFA-05**: `server.py` adds `threading.Lock` double-checked locking around `_mcp_app` initialization — prevents duplicate FastMCP instances under concurrent Django workers
 
-- [ ] **SRVR-01**: FastMCP instance with `stateless_http=False`, `json_response=True`
-- [ ] **SRVR-02**: `get_mcp_app()` lazy factory — ASGI app created on first HTTP request (not at import time)
-- [ ] **SRVR-03**: `streamable_http_app()` mounted at `/plugins/nautobot-app-mcp-server/mcp/` via Django URL route
-- [ ] **SRVR-04**: ASGI bridge view (`WsgiToAsgi`) converting Django request → FastMCP ASGI → Django response
-- [ ] **SRVR-05**: `urls.py` with `path("mcp/", mcp_view)` — auto-discovered by Nautobot plugin system
-- [ ] **SRVR-06**: `post_migrate` signal wiring core tools registration after all apps' `ready()` hooks
+### Auth Caching
 
-### Tool Registry
+- [ ] **AUTH-01**: `auth.py` caches Nautobot user object on MCP session dict via `ctx.request_context.session["cached_user"]` — avoids DB lookup on every tool call within a batch MCP request
+- [ ] **AUTH-02**: Cache key is the token key; cache hit skips DB query; cache miss falls through to existing `Token.objects.select_related("user").get()` lookup
 
-- [ ] **REGI-01**: `MCPToolRegistry` thread-safe singleton with `threading.Lock`
-- [ ] **REGI-02**: `ToolDefinition` dataclass with name, func, description, input_schema, tier, scope fields
-- [ ] **REGI-03**: `register_mcp_tool()` public API for third-party Nautobot apps
-- [ ] **REGI-04**: `get_core_tools()`, `get_by_scope()`, `fuzzy_search()` registry methods
-- [ ] **REGI-05**: `@mcp.list_tools()` override for progressive disclosure — returns session-active tools only
+### Testing & Validation
 
-### Authentication & Permissions
+- [ ] **TEST-01**: All existing unit tests pass after refactor (`poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests`)
+- [ ] **TEST-02**: Integration test sends two sequential MCP HTTP requests with `Mcp-Session-Id` header; verifies `mcp_list_tools` response on the second request reflects scopes enabled in the first (session persistence UAT)
+- [ ] **TEST-03**: UAT smoke tests pass (`docker exec ... python /source/scripts/run_mcp_uat.py`)
 
-- [ ] **AUTH-01**: `get_user_from_request()` extracting Nautobot user from MCP request context `Authorization: Token nbapikey_xxx` header
-- [ ] **AUTH-02**: `AnonymousUser` returns empty queryset (not error) with debug warning logged
-- [ ] **AUTH-03**: Nautobot object-level permissions via `.restrict(user, action="view")` on every queryset
+---
 
-### Session State
+## v2 Requirements
 
-- [ ] **SESS-01**: `MCPSessionState` dataclass with `enabled_scopes` and `enabled_searches`
-- [ ] **SESS-02**: Session state stored per `Mcp-Session-Id` via FastMCP `StreamableHTTPSessionManager`
-- [ ] **SESS-03**: `mcp_enable_tools(scope=...)` tool enabling exact scope + children and fuzzy search
-- [ ] **SESS-04**: `mcp_disable_tools(scope=...)` tool disabling scopes
-- [ ] **SESS-05**: `mcp_list_tools()` tool returning all registered tools filtered by session state
-- [ ] **SESS-06**: Core tools always enabled regardless of session state
+Deferred to future release.
 
-### Core Read Tools
+### Auto Schema Generation
 
-- [x] **TOOL-01**: `device_list` — list devices with status, platform, location; select_related; paginate; restrict(user)
-- [x] **TOOL-02**: `device_get` — single device by name or pk with interfaces prefetched
-- [x] **TOOL-03**: `interface_list` — list interfaces filtered by device_name; paginate; restrict(user)
-- [x] **TOOL-04**: `interface_get` — single interface by pk with ip_addresses prefetched
-- [x] **TOOL-05**: `ipaddress_list` — list IP addresses with tenant, vrf; paginate; restrict(user)
-- [x] **TOOL-06**: `ipaddress_get` — single IP address by address or pk with interfaces prefetched
-- [x] **TOOL-07**: `prefix_list` — list prefixes with vrf, tenant; paginate; restrict(user)
-- [x] **TOOL-08**: `vlan_list` — list VLANs with site, group; paginate; restrict(user)
-- [x] **TOOL-09**: `location_list` — list locations with location_type, parent; paginate; restrict(user)
-- [ ] **TOOL-10**: `search_by_name` — multi-model name search across devices, interfaces, IPs, prefixes, VLANs, locations
+- **SCHEMA-01**: Type-hint-based `input_schema` generator from function signatures using `inspect.signature` — reduces boilerplate for new tools
+- **SCHEMA-02**: Auto-detect Django model fields from function annotations to populate `properties`
 
-### Pagination & Serialization
+### Session Persistence
 
-- [ ] **PAGE-01**: `paginate_queryset(qs, limit, cursor)` with `LIMIT_DEFAULT=25`, `LIMIT_MAX=1000`
-- [ ] **PAGE-02**: `LIMIT_SUMMARIZE=100` — auto-summarize when raw count > 100, count BEFORE slicing
-- [ ] **PAGE-03**: `PaginatedResult` dataclass with items, cursor, total_count, summary fields
-- [ ] **PAGE-04**: Cursor encoding as `base64(str(pk))` — works for UUID and string PKs
-- [x] **PAGE-05**: `sync_to_async(fn, thread_sensitive=True)` for all ORM calls inside async tool handlers
+- **SESS-01**: Persist MCP session state to Nautobot's Django session backend — survives process restarts
+- **SESS-02**: `django_request_ctx` context var for passing Django `HttpRequest` to async tool handlers without explicit argument passing
 
-### SKILL.md Package
+### Extensibility
 
-- [x] **SKILL-01**: `nautobot-mcp-skill/` pip package with SKILL.md
-- [x] **SKILL-02**: SKILL.md with Core Tools reference table, scope management patterns, pagination docs
-- [x] **SKILL-03**: SKILL.md with investigation workflows (investigate device, find by name, explore Juniper BGP)
-
-### Testing
-
-- [ ] **TEST-01**: `test_registry.py` — singleton thread safety, registration, scope matching, fuzzy search
-- [ ] **TEST-02**: `test_core_tools.py` — ORM mocking, pagination, auth enforcement, anonymous fallback
-- [ ] **TEST-03**: `test_view.py` — ASGI bridge, HTTP round-trip, endpoint reachability
-- [ ] **TEST-04**: `test_signal_integration.py` — `post_migrate` timing, tool registration, third-party tool discovery
-- [ ] **TEST-05**: Coverage threshold `fail_under = 50` in `pyproject.toml`
-- [ ] **TEST-06**: Auth test: valid token → data, invalid token → empty + warning logged
+- **TOOL-01**: Evaluate `MCPToolset` metaclass registry — auto-register public methods as MCP tools from class definition
 
 ---
 
 ## Out of Scope
 
+Explicitly excluded. Documented to prevent scope creep.
+
 | Feature | Reason |
-|---|---|
-| Write tools (create/update/delete) | Focus on read-only v1 |
-| MCP `resources` or `prompts` endpoints | Tools first |
-| Redis session backend | In-memory sessions sufficient for v1 |
-| Option B separate worker process | Option A (embedded) is correct path |
-| Tool-level field permissions | Deferred |
-| Streaming SSE rows | Cursor pagination handles memory |
+|---------|--------|
+| DRF integration | Nautobot has no DRF; manual view approach is leaner and sufficient |
+| Django `SessionStore` delegation | In-memory FastMCP sessions sufficient for Docker single-process; DB overhead not justified |
+| Metaclass-based tool registry | `register_mcp_tool()` explicit API is sufficient for ~10 tools; metaclass overhead not justified |
+| Write tools (create/update/delete) | Permission surface widens significantly; deferred to v2 |
+| `redis` session backend | Over-engineering for v1; in-memory sessions sufficient |
 
 ---
 
 ## Traceability
 
+Which phases cover which requirements. Updated during roadmap creation.
+
 | Requirement | Phase | Status |
-|---|---|---|
-| FOUND-01 | Phase 0 | Pending |
-| FOUND-02 | Phase 1 | Pending |
-| FOUND-03 | Phase 0 | Pending |
-| FOUND-04 | Phase 0 | Pending |
-| FOUND-05 | Phase 1 | Pending |
-| SRVR-01 | Phase 1 | Pending |
-| SRVR-02 | Phase 1 | Pending |
-| SRVR-03 | Phase 1 | Pending |
-| SRVR-04 | Phase 1 | Pending |
-| SRVR-05 | Phase 1 | Pending |
-| SRVR-06 | Phase 1 | Pending |
-| REGI-01 | Phase 1 | Pending |
-| REGI-02 | Phase 1 | Pending |
-| REGI-03 | Phase 1 | Pending |
-| REGI-04 | Phase 1 | Pending |
-| REGI-05 | Phase 2 | Pending |
-| AUTH-01 | Phase 2 | Pending |
-| AUTH-02 | Phase 2 | Pending |
-| AUTH-03 | Phase 2 | Pending |
-| SESS-01 | Phase 2 | Pending |
-| SESS-02 | Phase 2 | Pending |
-| SESS-03 | Phase 2 | Pending |
-| SESS-04 | Phase 2 | Pending |
-| SESS-05 | Phase 2 | Pending |
-| SESS-06 | Phase 2 | Pending |
-| TOOL-01 | Phase 3 | Complete |
-| TOOL-02 | Phase 3 | Complete |
-| TOOL-03 | Phase 3 | Complete |
-| TOOL-04 | Phase 3 | Complete |
-| TOOL-05 | Phase 3 | Complete |
-| TOOL-06 | Phase 3 | Complete |
-| TOOL-07 | Phase 3 | Complete |
-| TOOL-08 | Phase 3 | Complete |
-| TOOL-09 | Phase 3 | Complete |
-| TOOL-10 | Phase 3 | Pending |
-| PAGE-01 | Phase 3 | Pending |
-| PAGE-02 | Phase 3 | Pending |
-| PAGE-03 | Phase 3 | Pending |
-| PAGE-04 | Phase 3 | Pending |
-| PAGE-05 | Phase 3 | Complete |
-| SKILL-01 | Phase 4 | Complete |
-| SKILL-02 | Phase 4 | Complete |
-| SKILL-03 | Phase 4 | Complete |
-| TEST-01 | Phase 1 | Pending |
-| TEST-02 | Phase 3 | Pending |
-| TEST-03 | Phase 1 | Pending |
-| TEST-04 | Phase 1 | Pending |
-| TEST-05 | Phase 0 | Pending |
-| TEST-06 | Phase 2 | Pending |
+|-------------|-------|--------|
+| REFA-01 | Phase 5 | Pending |
+| REFA-02 | Phase 5 | Pending |
+| REFA-03 | Phase 5 | Pending |
+| REFA-04 | Phase 5 | Pending |
+| REFA-05 | Phase 5 | Pending |
+| AUTH-01 | Phase 5 | Pending |
+| AUTH-02 | Phase 5 | Pending |
+| TEST-01 | Phase 5 | Pending |
+| TEST-02 | Phase 5 | Pending |
+| TEST-03 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 47 total
-- Mapped to phases: 47
+
+- v1 requirements: 10 total
+- Mapped to phases: 10
 - Unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-04-01*
-*Last updated: 2026-04-01 after initial definition*
+
+*Requirements defined: 2026-04-03*
+*Last updated: 2026-04-03 after research synthesis*
