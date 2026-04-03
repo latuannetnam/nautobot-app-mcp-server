@@ -1045,3 +1045,132 @@ def validate_app_config(context):
     """Validate the app config based on the app config schema."""
     start(context, service=["nautobot"])
     nbshell(context, plain=True, file="development/app_config_schema.py", env={"APP_CONFIG_SCHEMA_COMMAND": "validate"})
+
+
+# ------------------------------------------------------------------------------
+# UAT / IMPORT
+# ------------------------------------------------------------------------------
+
+@task(
+    help={
+        "dry-run": "Preview what would be imported without writing to the database (default: False)",
+    }
+)
+def import_data(context, dry_run=False):
+    """Import data from a production Nautobot server into the dev environment.
+
+    Prerequisites:
+        1. Configure nautobot_import.env (copy nautobot_import.env.example)
+        2. Start the dev stack: poetry run invoke start
+
+    Usage:
+        poetry run invoke import-data           # Full import
+        poetry run invoke import-data --dry-run  # Preview only
+    """
+    start(context, service=["nautobot"])
+    _await_healthy_service(context, "nautobot")
+
+    nautobot_import_env = Path(context.nautobot_app_mcp_server.compose_dir).parent / "nautobot_import.env"
+    if not nautobot_import_env.exists():
+        print(
+            f"[WARN] {nautobot_import_env} not found.\n"
+            "       Copy nautobot_import.env.example to nautobot_import.env and fill in values.\n"
+            "       Skipping production data import."
+        )
+        return
+
+    command = [
+        "exec",
+        "--env=NAUTOBOT_CONFIG=/source/development/nautobot_config.py",
+        "--",
+        "nautobot",
+        "nautobot-server",
+        "import_production_data",
+    ]
+    if dry_run:
+        command.append("--dry-run")
+
+    docker_compose(context, " ".join(command), pty=True)
+
+
+@task
+def uat(context):
+    """Run the MCP UAT test suite against the dev environment.
+
+    Prerequisites:
+        1. poetry run invoke start
+        2. poetry run invoke import-data  (or manually configure data)
+
+    Usage:
+        poetry run invoke uat
+
+    Runs all functional and performance UAT tests:
+        - Session tools (T-01 to T-04)
+        - List tools correctness (T-05 to T-13)
+        - Get tools correctness (T-14 to T-21)
+        - Search tool (T-22 to T-26)
+        - Auth enforcement (T-27 to T-29)
+        - Performance tests (P-01 to P-08)
+    """
+    start(context, service=["nautobot"])
+    _await_healthy_service(context, "nautobot")
+
+    command = [
+        "exec",
+        "--env=NAUTOBOT_CONFIG=/source/development/nautobot_config.py",
+        "--",
+        "nautobot",
+        "python",
+        "/source/scripts/run_mcp_uat.py",
+    ]
+
+    docker_compose(context, " ".join(command), pty=True)
+
+
+@task
+def reset_dev_db(context):
+    """Reset the dev database and optionally re-import production data.
+
+    Usage:
+        poetry run invoke reset-dev-db           # Reset to clean dev DB
+        poetry run invoke reset-dev-db import   # Reset + import from production
+    """
+    import sys
+
+    if not is_truthy(context.nautobot_app_mcp_server.local):
+        print("Stopping services...")
+        docker_compose(context, "stop -- worker beat", pty=False, echo=False, hide=True)
+
+        print("Dropping and recreating database...")
+        if _is_compose_included(context, "postgres"):
+            db_service = "db"
+            db_cmd = (
+                "psql -U postgres -c 'DROP DATABASE IF EXISTS nautobot;' && "
+                "psql -U postgres -c 'CREATE DATABASE nautobot;'"
+            )
+        elif _is_compose_included(context, "mysql"):
+            db_service = "db"
+            db_cmd = (
+                "mysql --user=root --password=$MYSQL_ROOT_PASSWORD "
+                "-e 'DROP DATABASE IF EXISTS nautobot; CREATE DATABASE nautobot;'"
+            )
+        else:
+            raise Exit(code=1, message="Unsupported database backend")
+        docker_compose(context, f"exec -- {db_service} sh -c '{db_cmd}'", pty=False, echo=False)
+
+        print("Running migrations...")
+        docker_compose(context, "exec -- nautobot nautobot-server migrate --noinput", pty=False, echo=False)
+
+        print("Restarting services...")
+        docker_compose(context, "restart nautobot worker beat", pty=False, echo=False)
+        _await_healthy_service(context, "nautobot")
+    else:
+        print("[WARN] Running locally — reset-dev-db requires Docker Compose")
+        sys.exit(1)
+
+    import sys as _sys  # noqa: N813
+
+    # Re-import if requested
+    import_arg = None
+    # Note: we can't easily detect the "import" arg here since invoke doesn't
+    # pass unknown args. Use the import-data task instead for re-importing.
