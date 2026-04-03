@@ -8,10 +8,11 @@ This document covers the full workflow for importing real data from a production
 
 1. [Architecture Overview](#1-architecture-overview)
 2. [Configuration](#2-configuration)
-3. [Phase 1: Fetch from Production](#3-phase-1-fetch-from-production)
-4. [Phase 2: Import into Dev DB](#4-phase-2-import-into-dev-db)
-5. [Running UAT Tests](#5-running-uat-tests)
-6. [Known Issues & Debugging](#6-known-issues--debugging)
+3. [Reset & Import Script](#3-reset--import-script)
+4. [Phase 1: Fetch from Production](#4-phase-1-fetch-from-production)
+5. [Phase 2: Import into Dev DB](#5-phase-2-import-into-dev-db)
+6. [Running UAT Tests](#5-running-uat-tests)
+7. [Known Issues & Debugging](#6-known-issues--debugging)
 
 ---
 
@@ -80,9 +81,57 @@ The token format is typically `nbapikey_xxxxxxxxxxxx`.
 
 ---
 
-## 3. Phase 1: Fetch from Production
+## 3. Reset & Import Script
 
-### 3.1 What Gets Fetched
+For convenience, `scripts/reset_dev_db.sh` automates the full workflow in one command. It replaces the manual steps below.
+
+### 3.1 Quick Start
+
+```bash
+# Interactive menu (shows cache/DB status before choosing)
+bash scripts/reset_dev_db.sh
+
+# CLI shortcuts
+bash scripts/reset_dev_db.sh --reset      # Reset DB only
+bash scripts/reset_dev_db.sh --fetch       # Phase 1: fetch from production
+bash scripts/reset_dev_db.sh --import     # Reset + import (most common)
+bash scripts/reset_dev_db.sh --all         # Full pipeline: reset → fetch → import
+```
+
+### 3.2 What the Script Does
+
+**`--reset` / `do_reset`:**
+
+1. Stops all containers (releases DB connections)
+2. Drops and recreates the `nautobot` database
+3. Runs migrations
+4. Creates superuser from `creds.env`
+5. Restarts containers and waits for health
+
+**`--fetch` / `do_fetch`:**
+- Runs `scripts/fetch_production_data.py` on the host (no Docker needed)
+
+**`--import` / `do_import`:**
+1. Runs `do_reset` (fresh, clean DB)
+2. Verifies DB is empty
+3. Runs `nautobot-server import_production_data --cache-dir /source/import_cache`
+4. Verifies imported row counts
+
+### 3.3 Key Implementation Notes
+
+| Issue | Cause | Fix |
+|---|---|---|
+| `psql -U postgres` fails silently | Dev DB user is `nautobot` | Script sources `development.env` + `creds.env` |
+| `DROP DATABASE` fails "currently open" | Active connections to target DB | Script stops all containers first |
+| Import fails "cache not found" | `--cache-dir` not passed | Script passes `--cache-dir /source/import_cache` |
+| Import fails `location_type_id is null` | Fresh DB has no `LocationType` rows | Auto-creates a default `Region` type |
+| Import exits 0 with no output | Used `python ...` instead of `nautobot-server` | Script uses `nautobot-server import_production_data` |
+
+---
+
+## 4. Phase 1: Fetch from Production
+
+### 4.1 What Gets Fetched
 
 | File | Records | Notes |
 | --- | --- | --- |
@@ -101,7 +150,7 @@ The token format is typically `nbapikey_xxxxxxxxxxxx`.
 
 **Total: ~38,000 records** — expect 3–10 minutes depending on network.
 
-### 3.2 Running Phase 1
+### 4.2 Running Phase 1
 
 From the **host** (no Docker required):
 
@@ -112,7 +161,7 @@ python -u scripts/fetch_production_data.py
 
 The `-u` flag ensures unbuffered output so you can see progress in real-time.
 
-### 3.3 Resume Support
+### 4.3 Resume Support
 
 If Phase 1 times out (e.g., on `ip_addresses`), re-run the same command. Already-fetched files are skipped:
 
@@ -121,7 +170,7 @@ If Phase 1 times out (e.g., on `ip_addresses`), re-run the same command. Already
     interfaces: already exists (247 records, skipping)
 ```
 
-### 3.4 Troubleshooting Phase 1
+### 4.4 Troubleshooting Phase 1
 
 | Problem | Cause | Fix |
 | --- | --- | --- |
@@ -132,9 +181,9 @@ If Phase 1 times out (e.g., on `ip_addresses`), re-run the same command. Already
 
 ---
 
-## 4. Phase 2: Import into Dev DB
+## 5. Phase 2: Import into Dev DB
 
-### 4.1 Running Phase 2
+### 5.1 Running Phase 2
 
 From **inside the Nautobot container**:
 
@@ -154,7 +203,7 @@ docker exec ... nautobot-server import_production_data \
   --cache-dir /tmp/my_cache
 ```
 
-### 4.2 Import Order
+### 5.2 Import Order
 
 The import command runs in this fixed order (respecting FK dependencies):
 
@@ -172,7 +221,7 @@ The import command runs in this fixed order (respecting FK dependencies):
 - **Prefixes:** Batched `bulk_create` (500/batch)
 - **IP Addresses:** `get_or_create` — unavoidable because Nautobot validates parent prefix per row
 
-### 4.3 Typical Import Times
+### 5.3 Typical Import Times
 
 | Model | Count | Method | Time |
 | --- | --- | --- | --- |
@@ -184,7 +233,7 @@ The import command runs in this fixed order (respecting FK dependencies):
 | VLANs | ~200 | bulk_create | < 1s |
 | **Total** | **~38,000** | — | **~23s** |
 
-### 4.4 Verify the Import
+### 5.4 Verify the Import
 
 ```bash
 docker exec nautobot-app-mcp-server-nautobot-1 \
@@ -203,7 +252,7 @@ Expected output:
   VLANs:      203
 ```
 
-### 4.5 Troubleshooting Phase 2
+### 5.5 Troubleshooting Phase 2
 
 | Error | Cause | Fix |
 | --- | --- | --- |
@@ -215,9 +264,9 @@ Expected output:
 
 ---
 
-## 5. Running UAT Tests
+## 6. Running UAT Tests
 
-### 5.1 MCP Endpoint URL
+### 6.1 MCP Endpoint URL
 
 Once the container is running (after the fixes described in §6 are applied):
 

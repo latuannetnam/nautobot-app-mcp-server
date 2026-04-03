@@ -65,6 +65,28 @@ cp development/creds.env.example development/creds.env
 # Edit development/creds.env with your secrets
 ```
 
+### Resetting & Importing the Dev DB
+
+The script `scripts/reset_dev_db.sh` handles the full two-phase workflow. Requires `nautobot_import.env` (see `docs/dev/import_and_uat.md`).
+
+```bash
+# Interactive menu (shows cache/DB status before choosing)
+bash scripts/reset_dev_db.sh
+
+# CLI shortcuts:
+bash scripts/reset_dev_db.sh --reset      # Reset DB only (drop/migrate/superuser)
+bash scripts/reset_dev_db.sh --fetch     # Phase 1: pull from production → JSON cache
+bash scripts/reset_dev_db.sh --import    # Reset DB + import cached data (most common)
+bash scripts/reset_dev_db.sh --all       # Full pipeline: reset → fetch → import
+```
+
+Key implementation notes for Claude memory:
+- Docker compose files live in `development/`, not project root — use `--project-directory` with `-f` flags.
+- DB user is `nautobot`, not `postgres` — always use `NAUTOBOT_DB_USER` from `development.env`.
+- Management commands must use `nautobot-server import_production_data`, not bare `python ...`.
+- Pass `--cache-dir /source/import_cache` (volume-mounted from host's `import_cache/`).
+- Fresh DB has no `LocationType` rows — `import_production_data.py` auto-creates a default `Region` type.
+
 ---
 
 ## Testing Workflow

@@ -215,12 +215,24 @@ class Command(BaseCommand):
         log(f"Namespaces: {len(ns_map)} total, {new_ns} created")
 
         # -------------------------------------------------------------------------
+        # 0c. Ensure at least one LocationType exists (fresh DB may have none)
+        # -------------------------------------------------------------------------
+        if not lt_map:
+            default_lt_name = "Region"
+            default_lt = LocationType.objects.create(name=default_lt_name)
+            lt_map[default_lt_name] = default_lt
+            log(f"No LocationTypes in dev DB — created default '{default_lt_name}'")
+        else:
+            default_lt_name = next(iter(lt_map))
+            log(f"LocationTypes: {len(lt_map)} from dev DB")
+
+        # -------------------------------------------------------------------------
         # 1. Import locations
         # -------------------------------------------------------------------------
         self.stdout.write(self.style.HTTP_INFO("\n[1/5] Importing locations..."))
 
-        # Some locations may have no location_type — fall back to first available LT
-        default_lt = next((lt for lt in lt_map.values()), None)
+        # Use the first available LT for all locations (cache has no location_type_name)
+        default_lt = next(lt for lt in lt_map.values())
 
         location_objs = []
         for loc_data in cache_locations:
