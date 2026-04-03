@@ -13,7 +13,7 @@ progress:
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-03 (Phase 5 executing — WAVE1 + WAVE2 complete, all REFA/AUTH/SESS/TEST requirements done)
+**Last updated:** 2026-04-03 (Phase 5 WAVE2-VIEW complete — REFA-01/02/03 done; WAVE1+2 all complete; TEST-03 remaining)
 **Roadmap:** `.planning/ROADMAP.md`
 
 ---
@@ -53,7 +53,7 @@ Status: Phase 5 code complete; TEST-03 (UAT smoke tests) + docs remaining
 | Phase 2 | Authentication & Sessions | **Completed** | 2026-04-01 | 2026-04-01 | None |
 | Phase 3 | Core Read Tools | **Completed** | 2026-04-02 | 2026-04-02 | None |
 | Phase 4 | SKILL.md Package | **Completed** | 2026-04-02 | 2026-04-02 | None |
-| Phase 5 | MCP Server Refactor | WAVE1-SERVER done (5010d32); WAVE1-AUTH done (52c235c); WAVE1-SESSION done (a5a11f2); WAVE2-TEST-AUTH done (e8a8c66); WAVE2-TEST-INTEGRATION done (a9f9d63); WAVE2-TEST-SESSION done (18c1148); WAVE2-VIEW+TEST-VIEW done (21e2f6d); REFA-01+REFA-02+REFA-03+REFA-04+REFA-05+AUTH-01+AUTH-02+SESS-fix+TEST-01+TEST-02 done | 2026-04-03 | — | None |
+| Phase 5 | MCP Server Refactor | WAVE1-SERVER done (5010d32); WAVE1-AUTH done (52c235c); WAVE1-SESSION done (a5a11f2); WAVE2-TEST-AUTH done (e8a8c66); WAVE2-TEST-INTEGRATION done (a9f9d63); WAVE2-TEST-SESSION done (18c1148); WAVE2-VIEW+TEST-VIEW done (21e2f6d, 67cdef5); REFA-01+02+03+04+05+AUTH-01+AUTH-02+SESS-fix+TEST-01+02 done; TEST-03 (UAT) pending | 2026-04-03 | — | None |
 | Phase 6 | UAT & Validation | Not Started | — | — | Phase 5 |
 
 ---
@@ -78,6 +78,7 @@ Status: Phase 5 code complete; TEST-03 (UAT smoke tests) + docs remaining
 | 0.1.0 | 2026-04-03 | Phase 5 WAVE2-TEST-INTEGRATION executed | Session persistence integration test added; commit a9f9d63; test_session_persistence.py (216 lines, 2 test cases) |
 | 0.1.0 | 2026-04-03 | Phase 5 WAVE2-TEST-SESSION executed | TEST-01 coverage for request_context state storage; commit 18c1148; GetToolStateTestCase (3 tests) + ProgressiveDisclosureIntegrationTestCase (1 test) |
 | 0.1.0 | 2026-04-03 | Phase 5 WAVE2-VIEW+TEST-VIEW executed | REFA-01+02+03 done; view.py async_to_sync+session_manager.run() replaces asyncio.run(); test_view.py updated for new pattern; commit 21e2f6d |
+| 0.1.0 | 2026-04-03 | Phase 5 WAVE2-VIEW test fix | Test assertion fixed: "import asyncio" instead of substring "asyncio.run" (avoided docstring false-positive); commit 67cdef5 |
 
 ---
 
