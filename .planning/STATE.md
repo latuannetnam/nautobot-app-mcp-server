@@ -1,33 +1,28 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.1.0
-milestone_name: MCP Server Refactor
-status: roadmap_defined
-last_updated: "2026-04-03T00:00:00.000Z"
+milestone_name: milestone
+status: executing
+last_updated: "2026-04-03T11:05:00.000Z"
 progress:
-  total_phases: 6
-  completed_phases: 4
-  phases:
-    phase_0: Completed
-    phase_1: Completed
-    phase_2: Completed
-    phase_3: Completed
-    phase_4: Completed
-    phase_5: Defining
+  total_phases: 5
+  completed_phases: 2
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-03 (Phase 5 roadmap defined — MCP Server Refactor)
+**Last updated:** 2026-04-03 (Phase 5 executing — WAVE1-SERVER complete)
 **Roadmap:** `.planning/ROADMAP.md`
 
 ---
 
 ## Current Position
 
-Phase: Phase 5 — MCP Server Refactor
-Plan: —
-Status: Roadmap defined; awaiting execution
+Phase: 05 (mcp-server-refactor) — EXECUTING
+Plan: 1 of 1
+Status: Executing Phase 05
 
 **Root cause identified:** `asyncio.run()` in `view.py` destroys FastMCP's event loop on every request. Fix: `async_to_sync(_call_starlette_handler) + session_manager.run()`. Single-phase refactor sourced from django-mcp-server.
 
@@ -58,7 +53,7 @@ Status: Roadmap defined; awaiting execution
 | Phase 2 | Authentication & Sessions | **Completed** | 2026-04-01 | 2026-04-01 | None |
 | Phase 3 | Core Read Tools | **Completed** | 2026-04-02 | 2026-04-02 | None |
 | Phase 4 | SKILL.md Package | **Completed** | 2026-04-02 | 2026-04-02 | None |
-| Phase 5 | MCP Server Refactor | Defining | — | — | Phase 4 ✓ |
+| Phase 5 | MCP Server Refactor | WAVE1-SERVER executed (5010d32); REFA-04+REFA-05 done | 2026-04-03 | — | None |
 | Phase 6 | UAT & Validation | Not Started | — | — | Phase 5 |
 
 ---
@@ -76,6 +71,7 @@ Status: Roadmap defined; awaiting execution
 | 0.1.0-dev | 2026-04-02 | Phase 4 executed | SKILL.md package; commits |
 | 0.1.0 | 2026-04-03 | v1.1.0 started | MCP server refactor milestone begins |
 | 0.1.0 | 2026-04-03 | Phase 5 roadmap defined | Single-phase refactor (10 reqs); sourced from django-mcp-server |
+| 0.1.0 | 2026-04-03 | Phase 5 WAVE1-SERVER executed | REFA-04+REFA-05 done; commit 5010d32; server.py thread-safe singletons + get_session_manager() |
 
 ---
 

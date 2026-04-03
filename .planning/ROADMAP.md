@@ -370,8 +370,8 @@ nautobot-mcp-skill/
 | REFA-01 | `view.py`: replace `asyncio.run()` with `async_to_sync(_call_starlette_handler)` | Pending |
 | REFA-02 | `view.py`: `async with session_manager.run():` before `handle_request()` | Pending |
 | REFA-03 | `view.py`: ASGI scope dict built from Django request (server, scheme, client, path, query_string, headers, method, http_version) | Pending |
-| REFA-04 | `server.py`: `get_session_manager()` returning `StreamableHTTPSessionManager` singleton | Pending |
-| REFA-05 | `server.py`: `threading.Lock` double-checked locking on `_mcp_app` | Pending |
+| REFA-04 | `server.py`: `get_session_manager()` returning `StreamableHTTPSessionManager` singleton | **Completed** (WAVE1-SERVER, 5010d32) |
+| REFA-05 | `server.py`: `threading.Lock` double-checked locking on `_mcp_app` | **Completed** (WAVE1-SERVER, 5010d32) |
 | AUTH-01 | `auth.py`: `ctx.request_context.session["cached_user"]` caching | Pending |
 | AUTH-02 | `auth.py`: token key cache; hit skips DB query, miss falls through | Pending |
 | TEST-01 | All existing unit tests pass after refactor | Pending |
