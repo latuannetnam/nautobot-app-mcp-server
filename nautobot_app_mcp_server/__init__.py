@@ -24,12 +24,15 @@ class NautobotAppMcpServerConfig(NautobotAppConfig):
     urls = ["nautobot_app_mcp_server.urls"]
 
     def ready(self) -> None:
-        """Connect post_migrate signal for tool registration.
+        """Initialize the MCP server app.
 
-        post_migrate fires after migrations for this app complete.
-        At that point all other apps' ready() hooks have already run,
-        so their register_mcp_tool() calls are already in the registry.
+        1. Call super().ready() FIRST so Nautobot registers our urls.py via
+           NautobotAppConfig.ready() → plugin_patterns.append(...).
+        2. Connect post_migrate signal AFTER so register_mcp_tool() calls from
+           other apps (that fire on their own post_migrate) are already in the registry.
         """
+        super().ready()  # Registers URL patterns (MUST be first)
+
         from django.db.models.signals import post_migrate
 
         import nautobot_app_mcp_server.mcp.tools  # noqa: F401

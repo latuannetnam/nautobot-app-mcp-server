@@ -124,7 +124,7 @@ def get_mcp_app() -> Starlette:
         mcp_instance = _setup_mcp_app()
         _mcp_app = mcp_instance.http_app(
             path="/mcp",
-            transport="streamable http",
+            transport="streamable-http",
             stateless_http=False,
             json_response=True,
         )

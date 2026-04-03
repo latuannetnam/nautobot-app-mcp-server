@@ -309,3 +309,9 @@ public
 /compose.yaml
 /dump.sql
 /nautobot_app_mcp_server/static/nautobot_app_mcp_server/docs
+
+# Other
+*.env
+
+# Import cache — raw production data JSON (Phase 1 output, Phase 2 input)
+import_cache/

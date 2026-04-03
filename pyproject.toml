@@ -35,6 +35,10 @@ nautobot = ">=3.0.0,<4.0.0"
 # MCP server layer
 fastmcp = "^3.2.0"
 
+# REST API client for production data import
+python-dotenv = "*"
+requests = "*"
+
 [tool.poetry.group.dev.dependencies]
 coverage = "*"
 django-debug-toolbar = "*"
