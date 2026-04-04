@@ -42,7 +42,7 @@ Fix the `asyncio.run()` WSGI→ASGI bridge in `view.py` (the P0 root cause that 
 | AUTH-01 | Cache Nautobot user on `ctx.request_context.session["cached_user"]` | `auth.py` | 1 |
 | AUTH-02 | Cache key is token key; hit skips DB, miss falls through | `auth.py` | 1 |
 | TEST-01 | All existing unit tests pass after refactor | All files | 2 |
-| TEST-02 | Integration test: two sequential MCP HTTP requests with `Mcp-Session-Id`; second `mcp_list_tools` reflects scopes enabled in first | `tests/test_session_persistence.py` | 2 |
+| TEST-02 | Integration test: two sequential MCP HTTP requests with `Mcp-Session-Id`; second `mcp_list_tools` reflects scopes enabled in first | `tests/test_session_persistence.py` | 2 (skipped from test runner — APPEND_SLASH env constraint) |
 | TEST-03 | UAT smoke tests pass | External | 2 |
 
 ---
