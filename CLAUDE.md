@@ -193,40 +193,107 @@ Use GSD commands for all implementation work. Do not make direct repo edits outs
 ## Project Structure
 
 ```
-nautobot_app_mcp_server/          # Main app package (no DB models)
-│   ├── __init__.py              # NautobotAppMcpServerConfig + post_migrate signal
-│   ├── api/                     # REST API (empty — no models)
+nautobot_app_mcp_server/
+│   ├── __init__.py                # Config + post_migrate signal → init registry
 │   ├── mcp/
-│   │   ├── server.py            # FastMCP lazy factory (PIT-03)
-│   │   ├── session_tools.py     # MCPSessionState + session management tools
-│   │   ├── registry.py          # MCPToolRegistry singleton + ToolDefinition
-│   │   ├── view.py             # Django → FastMCP ASGI bridge
-│   │   ├── auth.py             # get_user_from_request()
-│   │   └── tests/              # Unit tests
-│   └── tests/                  # Unit tests
-development/                     # Docker Compose dev environment
-docs/dev/                        # Developer documentation
-tasks.py                         # Invoke automation tasks
-pyproject.toml                   # Poetry + tool config
-changes/                        # Towncrier release notes fragments
+│   │   ├── __init__.py            # register_mcp_tool() — public plugin API
+│   │   ├── server.py             # FastMCP lazy singleton, _list_tools_mcp override
+│   │   ├── session_tools.py      # MCPSessionState, progressive disclosure handler
+│   │   ├── registry.py           # MCPToolRegistry singleton + ToolDefinition dataclass
+│   │   ├── view.py               # mcp_view: Django→ASGI bridge (async_to_sync)
+│   │   ├── auth.py               # get_user_from_request() — Token auth, _cached_user
+│   │   ├── tools/
+│   │   │   ├── __init__.py       # Imports all core tools (side-effect registers them)
+│   │   │   ├── core.py           # 10 read tools (list/create/update/delete)
+│   │   │   ├── pagination.py     # Paginator helper
+│   │   │   └── query_utils.py    # Query-building helpers
+│   │   └── tests/
+│   │       ├── test_view.py, test_auth.py, test_session_tools.py, test_core_tools.py
+│   │       ├── test_signal_integration.py, test_session_persistence.py
+development/                       # Docker Compose dev environment
+docs/dev/                          # Developer docs
+scripts/reset_dev_db.sh            # DB reset + production import
+tasks.py                           # Invoke automation
+pyproject.toml                     # Poetry + tool config
+changes/                           # Towncrier release note fragments
 ```
 
 ---
 
-## MCP Server Implementation
+## MCP Server Architecture
 
-Key files and their purpose:
+### Request Flow
 
-| File | Purpose |
-|---|---|
-| `mcp/server.py` | FastMCP instance setup; progressive disclosure via `_list_tools_mcp` override |
-| `mcp/session_tools.py` | `MCPSessionState`, `_list_tools_handler`, `mcp_enable_tools`, `mcp_disable_tools`, `mcp_list_tools` |
-| `mcp/registry.py` | `MCPToolRegistry` (thread-safe singleton), `ToolDefinition` dataclass |
-| `mcp/view.py` | `mcp_view` — Django WSGI → FastMCP ASGI bridge |
-| `mcp/auth.py` | `get_user_from_request()` — extract Nautobot user from Django session |
-| `mcp/__init__.py` | `register_mcp_tool()` — public API for third-party Nautobot apps |
+```
+Django HTTP request
+  → mcp_view() [view.py, @csrf_exempt, async_to_sync]
+    → _bridge_django_to_asgi() [stores Django request in _django_request_ctx ContextVar]
+      → get_mcp_app() [server.py, lazy singleton, double-check locking]
+        → FastMCP http_app() [Starlette ASGI app, StreamableHTTPSessionManager]
+          → progressive_list_tools_mcp() [overrides mcp._list_tools_mcp]
+            → _list_tools_handler() [session_tools.py — filters by session state]
+              → MCPToolRegistry [registry.py — scope prefix matching for hierarchy]
+                → Auth guard [auth.py — Token header, _cached_user per RequestContext]
+                  → Tool function [tools/core.py]
+```
 
-**Session state** (`session_tools.py`): Per-conversation enabled scopes and fuzzy searches stored in FastMCP's session dict. Core tools always visible; app-tier tools filtered by scope hierarchy.
+### Key Design Decisions
+
+| Aspect | Decision | Rationale |
+|---|---|---|
+| Session state storage | `RequestContext._mcp_tool_state` dict, NOT `ServerSession` | `ServerSession` is NOT dict-like — latent bug if you store on session directly |
+| Event loop persistence | Daemon thread runs `lifespan_context()` + `Event.wait()` | Single event loop shared across Django requests preserves session state |
+| FastMCP initialization | Lazy `get_mcp_app()` on first HTTP request | Django ORM not ready at import time |
+| Progressive disclosure | Override `mcp._list_tools_mcp` directly | FastMCP 3.x `@mcp.list_tools()` is async decorator → TypeError |
+| Tool registration | `register_mcp_tool()` called at module import time | Third-party apps call it in `ready()` or `post_migrate` signal |
+| Scope hierarchy | Prefix matching (`t.scope.startswith(f"{scope}.")`) | Enabling `dcim` auto-activates `dcim.interface`, `dcim.device`, etc. |
+| Auth caching | `_cached_user` on `RequestContext` | Avoids repeated DB lookups per request batch |
+
+### `register_mcp_tool()` — Public Plugin API
+
+```python
+def register_mcp_tool(
+    name: str,
+    func: Callable,              # async function(ctx, **kwargs) → dict
+    description: str,
+    input_schema: dict,          # JSON Schema
+    tier: str = "app",           # "core" (always visible) or "app" (progressive)
+    app_label: str | None = None,
+    scope: str | None = None,    # dot-separated, e.g. "dcim.device"
+) -> None
+```
+
+All 13 tools (3 session + 10 core read) are registered via this API in `mcp/tools/__init__.py`.
+
+### `MCPToolRegistry` Singleton (`registry.py`)
+
+Thread-safe singleton with double-checked locking. Stores `ToolDefinition(name, func, description, input_schema, tier, app_label, scope)`. Key methods:
+- `register()` — raises `ValueError` on duplicate
+- `get_core_tools()` — all `tier="core"`
+- `get_by_scope(scope)` — exact match + all child scopes (prefix match)
+- `fuzzy_search(term)` — case-insensitive substring on name + description
+
+---
+
+## Auth — Token Format & Gotchas
+
+- Token key: **40-char hex, no prefix** (NOT `nbapikey_<hex>`)
+- Source: `Authorization: Token <key>` header on **MCP request**, not Django request (PIT-16)
+- Cache: `_cached_user` on `RequestContext` — per-request, not cross-request
+- On missing/invalid token: returns `AnonymousUser` (empty querysets via `.restrict()`); logs `WARNING` (missing) or `DEBUG` (invalid)
+
+---
+
+## FastMCP 3.x Gotchas (Current Implementation)
+
+| Issue | Location | Detail |
+|---|---|---|
+| `@mcp.list_tools()` raises `TypeError` | server.py L76 | FastMCP 3.x: async decorator, not usable → override `mcp._list_tools_mcp` |
+| `ServerSession` is NOT dict-like | session_tools.py L13 | Store state on `request_context`, not `session` directly |
+| Django ORM not ready at import time | server.py L4-5 | Lazy `get_mcp_app()` defers FastMCP creation to first request |
+| Event loop must persist across requests | view.py L117 | Use `async_to_sync` (reuses existing loop), NOT `asyncio.run()` |
+| `StreamableHTTPSessionManager.run()` needs lifespan | server.py L135-167 | Daemon thread: `lifespan_context()` → `Event.wait()` |
+| `_cached_user` is per-`RequestContext` | auth.py L85 | Caches per-request, not across requests |
 
 ---
 
