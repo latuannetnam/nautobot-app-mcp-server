@@ -3,7 +3,7 @@
 **Project:** Nautobot App MCP Server
 **Roadmap defined:** 2026-04-01
 **Horizon:** v1.1.0
-**Phases:** 6 (v1.0: Phases 0–4; v1.1.0: Phase 5)
+**Phases:** 7 (v1.0: Phases 0–4; v1.1.0: Phases 5–6)
 
 ---
 
@@ -39,8 +39,7 @@ Phase 0 ──► Phase 1 ──► Phase 3
 | **Phase 3** | Core Read Tools | 15 (TOOL-01–10; PAGE-01–05; TEST-02) | 1 test file | 10 core tools + 3 meta tools operational |
 | **Phase 4** | SKILL.md Package | 3 (SKILL-01–03) | 0 new | `nautobot-mcp-skill/` pip package published |
 | **Phase 5** | MCP Server Refactor | 10 (REFA-01–05; AUTH-01–02; TEST-01–03) | 1 integration test | Session state persists; progressive disclosure works |
-
-**Total: 57 requirements, 6 phases, 5 test files**
+| **Phase 6** | UAT & Smoke Tests | 1 (TEST-03) | 1 UAT script | All smoke tests pass; Phase 5 refactor validated end-to-end |
 
 ---
 
@@ -280,6 +279,34 @@ nautobot-mcp-skill/
 
 ---
 
+## Phase 6 — UAT & Smoke Tests
+
+**Purpose:** Run the UAT smoke test suite (`scripts/run_mcp_uat.py`) end-to-end against the live Nautobot server. Validate that the Phase 5 refactor (lifecycle-managed FastMCP, session persistence, auth caching) works correctly in a real environment. Fix any pre-existing UAT issues discovered during the Phase 5 test run.
+
+**Requirements:**
+
+| ID | Requirement | File |
+|---|---|---|
+| TEST-03 | UAT smoke tests pass (`docker exec ... python /source/scripts/run_mcp_uat.py`) | `scripts/run_mcp_uat.py` |
+
+**Known issues to fix:**
+
+1. **Wrong MCP endpoint URL** — UAT uses `http://localhost:8080/mcp/` but the actual endpoint is `http://localhost:8080/plugins/nautobot-app-mcp-server/mcp/`. The plugin's `PLUGINS` setting in the live server is `[]` (empty), meaning `plugin_patterns()` is not including the plugin's URLs. Fix: either add the app to `PLUGINS` in `development.env`, or update the UAT to use a URL that actually works.
+
+2. **APPEND_SLASH redirect** — Live Nautobot server has `APPEND_SLASH=True`. Requests to `/plugins/nautobot-app-mcp-server/mcp/` redirect with 307, stripping the POST body. Fix: use `allow_redirects=False` and the correct URL without trailing-slash-induced redirects.
+
+3. **Auth token prefix** — `auth.py` correctly removed the `nbapikey_` prefix (Nautobot tokens have no prefix). The UAT test tokens `nbapikey_xxx` will never match real tokens (which are 40-char hex without prefix). Fix: update test tokens to use real Nautobot tokens.
+
+**Success Criteria:**
+
+1. `docker exec nautobot-app-mcp-server-nautobot-1 python /source/scripts/run_mcp_uat.py` exits with code 0 — all UAT tests pass
+2. UAT output shows session tools (`mcp_enable_tools`, `mcp_disable_tools`) working correctly
+3. No `LookupError` for `Server.request_context.get()` in UAT output
+4. All 37 UAT test cases pass (Auth, List, Get, Search, Performance categories)
+5. Phase 5 refactor is validated end-to-end: FastMCP sessions persist across requests
+
+---
+
 ## Requirements Traceability
 
 ### Phase 0 — Project Setup
@@ -381,6 +408,14 @@ nautobot-mcp-skill/
 
 **Coverage:** 11 v1.1.0 requirements mapped to Phase 5 (10 from roadmap + SESS-fix latent bug). 100% traceability.
 
+### Phase 6 — UAT & Smoke Tests
+
+| Req ID | Requirement | Status |
+|---|---|---|
+| TEST-03 | UAT smoke tests pass | Pending |
+
+**Coverage:** 1 requirement (TEST-03) mapped to Phase 6. 100% traceability.
+
 ---
 
 ## Phase Exit Gates
@@ -393,6 +428,7 @@ nautobot-mcp-skill/
 | Phase 3 | All 10 core + 3 meta tools return `PaginatedResult`; coverage ≥ 50% | `poetry run invoke coverage` |
 | Phase 4 | `pip install nautobot-mcp-skill` succeeds; SKILL.md complete | `pip install ./nautobot-mcp-skill` |
 | Phase 5 | All unit tests pass; session persistence integration test passes; UAT smoke tests pass | `poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests` |
+| Phase 6 | All UAT smoke tests pass; Phase 5 refactor validated end-to-end | `docker exec nautobot-app-mcp-server-nautobot-1 python /source/scripts/run_mcp_uat.py` |
 
 ---
 
