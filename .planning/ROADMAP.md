@@ -173,7 +173,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 ### Phase 11: Auth Refactor
 
-**Goal:** `get_user_from_request()` reads token from FastMCP request headers. Token cached in `ctx.request_context.session["cached_user"]`. `.restrict()` preserved. nginx `proxy_set_header Authorization` documented.
+**Goal:** `get_user_from_request()` reads token from FastMCP request headers. Token cached via FastMCP `ctx.set_state("mcp:cached_user")`. `.restrict()` preserved. nginx `proxy_set_header Authorization` documented.
 
 **Depends on:** Phase 10
 
@@ -181,24 +181,23 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 **Success Criteria** (what must be TRUE):
 
-1. `get_user_from_request()` reads token from FastMCP request headers (`Authorization: Token <hex>`)
-2. Token cached in `ctx.request_context.session["cached_user"]` — no monkey-patch; survives batched requests
+1. `get_user_from_request()` is `async def`; reads token from FastMCP request headers (`Authorization: Token <hex>`)
+2. Token cached in FastMCP session state via `ctx.set_state("mcp:cached_user", str(user.pk))`; survives batched requests
 3. All querysets call `.restrict(user, action="view")` (preserved from v1.1.0)
 4. `docs/admin/upgrade.md` documents `proxy_set_header Authorization` for nginx production deployments
 
-**Plans:** 4 plans
+**Plans:** 2 plans
 
-- [ ] 11-01: `get_user_from_request()` reads token from FastMCP request headers
-- [ ] 11-02: Token cached in `ctx.request_context.session["cached_user"]` (no monkey-patch)
-- [ ] 11-03: `.restrict(user, "view")` on all querysets — preserved unchanged
-- [ ] 11-04: Document `proxy_set_header Authorization` for nginx in `docs/admin/upgrade.md`
+- [ ] 11-01: `get_user_from_request()` async refactor + FastMCP state cache (P4-01, P4-02)
+- [ ] 11-02: Update call sites in core.py + nginx docs in upgrade.md (P4-03, P4-04)
 
 **Known pitfalls:**
 
 - PITFALL #7: Auth header stripped by nginx reverse proxy. Must explicitly set `proxy_set_header Authorization $http_authorization;` in nginx config
 - Token key is 40-char hex, no `nbapikey_` prefix (Nautobot's native token format)
+- ServerSession has no dict interface — use `ctx.set_state()`/`ctx.get_state()`, NOT `ctx.request_context.session["cached_user"]`
 
-**Phase exit gate:** Auth unit tests pass; token cached in `session["cached_user"]` verified by mock assertion
+**Phase exit gate:** Auth unit tests pass; `ctx.set_state("mcp:cached_user")` caching verified by mock assertion
 
 ---
 
@@ -273,7 +272,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 ## Progress
 
 | # | Phase | Milestone | Plans | Status | Completed |
-| ----- | --------- | -------------- | ------ | --------- |
+| ----- | --------- | -------------- | ------ | --------- |----------|
 | 0 | Project Setup | v1.0 | 4/4 | Complete | 2026-04-01 |
 | 1 | MCP Server Infrastructure | v1.0 | 11/11 | Complete | 2026-04-01 |
 | 2 | Auth & Sessions | v1.0 | 7/7 | Complete | 2026-04-01 |
@@ -285,7 +284,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 | 8 | Infrastructure | v1.2.0 | 4/4 | Complete | 2026-04-05 |
 | 9 | Tool Registration | v1.2.0 | 6/6 | Complete | 2026-04-05 |
 | 10 | Session State | v1.2.0 | 4/4 | Complete | 2026-04-05 |
-| 11 | Auth Refactor | v1.2.0 | 0/4 | Not started | — |
+| 11 | Auth Refactor | v1.2.0 | 0/2 | Not started | — |
 | 12 | Bridge Cleanup | v1.2.0 | 0/6 | Not started | — |
 | 13 | UAT & Validation | v1.2.0 | 0/5 | Not started | — |
 
@@ -299,7 +298,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 | Phase 8 | Both management commands importable; `create_app()` raises `RuntimeError` on unreachable DB | `python manage.py start_mcp_server --help` |
 | Phase 9 | All 10 core tools async; lazy import audit returns 0; decorator tests pass | `poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests` |
 | Phase 10 | Session tools use native `session` dict; no monkey-patch; scope_guard decorator active | `poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests` |
-| Phase 11 | Token auth UAT passes; `session["cached_user"]` caching verified by mock | `poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests` |
+| Phase 11 | Auth unit tests pass; `ctx.set_state("mcp:cached_user")` caching verified by mock | `poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests` |
 | Phase 12 | `view.py`, `server.py`, `urls.py` deleted; old endpoint returns 404; SKILL.md updated | `curl http://localhost:8080/plugins/nautobot-app-mcp-server/mcp/` → 404 |
 | Phase 13 | UAT smoke test exits 0; all 27 v1.2.0 requirements verified | `docker exec ... python /source/scripts/run_mcp_uat.py` |
 
