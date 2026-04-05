@@ -32,12 +32,14 @@ from typing import Any, Callable
 
 from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
+from nautobot_app_mcp_server.mcp.schema import func_signature_to_input_schema
 
 __all__ = [
     "MCPToolRegistry",
     "ToolDefinition",
     "get_user_from_request",
     "register_mcp_tool",
+    "register_tool",
 ]
 
 
@@ -88,3 +90,59 @@ def register_mcp_tool(
             scope=scope,
         )
     )
+
+
+def register_tool(
+    description: str,
+    *,
+    tier: str = "app",
+    scope: str | None = None,
+    input_schema: dict[str, Any] | None = None,
+    name: str | None = None,
+) -> Callable[[Callable], Callable]:
+    """Register a tool with auto-generated input_schema from the function signature.
+
+    This is a convenience decorator that wraps :func:`register_mcp_tool`.
+    It extracts the function name (or explicit ``name``) and derives the
+    ``input_schema`` from the function's type annotations using
+    :func:`func_signature_to_input_schema`.
+
+    Args:
+        description: Human-readable description for the MCP tool manifest.
+        tier: ``"core"`` for always-available tools, ``"app"`` for registered tools.
+        scope: Dot-separated scope string (e.g. ``"netnam_cms_core.juniper"``).
+        input_schema: Optional explicit schema. If omitted, auto-generated from
+            the function's type annotations.
+        name: Optional explicit tool name. If omitted, uses ``func.__name__``.
+
+    Returns:
+        A decorator that registers the tool and returns the original function.
+
+    Example::
+
+        @register_tool(description="List devices.", tier="core", scope="core")
+        async def device_list_handler(ctx: ToolContext, limit: int = 25) -> dict:
+            ...
+
+    Note:
+        ``mcp.tool()`` does NOT accept ``input_schema`` as a direct parameter —
+        FastMCP 3.x auto-derives the schema from Python type hints. The schema
+        stored in MCPToolRegistry is for cross-process discovery and documentation.
+        The FastMCP runtime uses its own auto-derived schema from the same function
+        signature.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        tool_name = name if name is not None else func.__name__
+        schema = input_schema if input_schema is not None else func_signature_to_input_schema(func)
+        register_mcp_tool(
+            name=tool_name,
+            func=func,
+            description=description,
+            input_schema=schema,
+            tier=tier,
+            scope=scope,
+        )
+        return func
+
+    return decorator
