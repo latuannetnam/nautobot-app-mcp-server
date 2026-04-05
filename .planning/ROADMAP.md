@@ -60,8 +60,8 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 **Plans:** 3 plans
 
-- [ ] 07-01: Add `uvicorn >= 0.35.0` explicit dependency to `pyproject.toml`
-- [ ] 07-02: Update `development/docker-compose.yml` — pass `NAUTOBOT_DB_*` env vars to MCP server service
+- [x] 07-01: Add `uvicorn >= 0.35.0` explicit dependency to `pyproject.toml`
+- [x] 07-02: Update `development/docker-compose.yml` — pass `NAUTOBOT_DB_*` env vars to MCP server service
 - [ ] 07-03: Document `--workers 1` requirement in `docs/admin/upgrade.md`
 
 **Known pitfalls:**
@@ -280,7 +280,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 | 4. SKILL.md Package | v1.0 | 3/3 | Complete | 2026-04-02 |
 | 5. MCP Server Refactor | v1.1.0 | 7/7 | Complete | 2026-04-04 |
 | 6. UAT & Smoke Tests | v1.1.0 | 1/1 | Complete | 2026-04-04 |
-| 7. Setup | v1.2.0 | 0/3 | Not started | — |
+| 7. Setup | v1.2.0 | 1/3 | In Progress | 2026-04-05 |
 | 8. Infrastructure | v1.2.0 | 0/4 | Not started | — |
 | 9. Tool Registration | v1.2.0 | 0/6 | Not started | — |
 | 10. Session State | v1.2.0 | 0/4 | Not started | — |
