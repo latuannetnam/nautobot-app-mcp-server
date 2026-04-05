@@ -46,7 +46,7 @@ async def _device_list_handler(
     Returns:
         dict with items (list of device dicts), cursor, total_count, summary.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_device_list, thread_sensitive=True)(
         user=user, limit=limit, cursor=cursor
     )
@@ -80,7 +80,7 @@ async def _device_get_handler(
     Raises:
         ValueError: If the device is not found.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_device_get, thread_sensitive=True)(user=user, name_or_id=name_or_id)
 
 
@@ -111,7 +111,7 @@ async def _interface_list_handler(
     Returns:
         dict with items (list of interface dicts), cursor, total_count, summary.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_interface_list, thread_sensitive=True)(
         user=user, device_name=device_name, limit=limit, cursor=cursor
     )
@@ -143,7 +143,7 @@ async def _interface_get_handler(
     Raises:
         ValueError: If the interface is not found.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_interface_get, thread_sensitive=True)(user=user, name_or_id=name_or_id)
 
 
@@ -172,7 +172,7 @@ async def _ipaddress_list_handler(
     Returns:
         dict with items (list of IP address dicts), cursor, total_count, summary.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_ipaddress_list, thread_sensitive=True)(
         user=user, limit=limit, cursor=cursor
     )
@@ -204,7 +204,7 @@ async def _ipaddress_get_handler(
     Raises:
         ValueError: If the IP address is not found.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_ipaddress_get, thread_sensitive=True)(user=user, name_or_id=name_or_id)
 
 
@@ -233,7 +233,7 @@ async def _prefix_list_handler(
     Returns:
         dict with items (list of prefix dicts), cursor, total_count, summary.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_prefix_list, thread_sensitive=True)(
         user=user, limit=limit, cursor=cursor
     )
@@ -264,7 +264,7 @@ async def _vlan_list_handler(
     Returns:
         dict with items (list of VLAN dicts), cursor, total_count, summary.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_vlan_list, thread_sensitive=True)(
         user=user, limit=limit, cursor=cursor
     )
@@ -295,7 +295,7 @@ async def _location_list_handler(
     Returns:
         dict with items (list of location dicts), cursor, total_count, summary.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_location_list, thread_sensitive=True)(
         user=user, limit=limit, cursor=cursor
     )
@@ -342,7 +342,7 @@ async def _search_by_name_handler(
     Raises:
         ValueError: If the query is empty or whitespace-only.
     """
-    user = get_user_from_request(ctx)
+    user = await get_user_from_request(ctx)
     return await sync_to_async(query_utils._sync_search_by_name, thread_sensitive=True)(
         user=user, query=query, limit=limit, cursor=cursor
     )

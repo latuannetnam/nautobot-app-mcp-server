@@ -11,7 +11,7 @@
 
 - ✅ **v1.0 MVP** - Phases 0–4 (shipped 2026-04-02)
 - ✅ **v1.1.0** - Phases 5–6 (shipped 2026-04-04)
-- 🚧 **v1.2.0** - Phases 7–13 (in progress)
+- 🚧 **v1.2.0** - Phases 7–12 (in progress); Phase 13 UAT pending
 - 📋 **v2.0** - TBD (write tools, Redis sessions, horizontal scaling)
 
 ---
@@ -24,6 +24,7 @@ Migrate the MCP server from embedded (Option A — FastMCP inside Django process
 
 ```
 Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 11 ──► Phase 12 ──► Phase 13
+               ✅           ✅           ✅           ✅           ✅
 ```
 
 ---
@@ -36,7 +37,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 | **Phase 8** | Infrastructure | P1-01–P1-04 (4) | `start_mcp_server.py` + `start_mcp_dev_server.py` management commands |
 | **Phase 9** | Tool Registration | P2-01–P2-06 (6) | `@register_tool` decorator, `tool_registry.json`, all tools async |
 | **Phase 10** | Session State | P3-01–P3-04 (4) | `ctx.request_context.session` native dict, `@scope_guard` decorator |
-| **Phase 11** | Auth Refactor | P4-01–P4-04 (4) | Token from FastMCP headers, session-cached user, nginx docs |
+| **Phase 11** ✅ | Auth Refactor | P4-01–P4-04 (4) | Token from FastMCP headers, session-cached user, nginx docs |
 | **Phase 12** | Bridge Cleanup | P5-01–P5-06 (6) | `view.py`/`server.py`/`urls.py` deleted, old endpoint returns 404 |
 | **Phase 13** | UAT & Validation | P6-01–P6-05 (5) | All UAT tests pass on port 8005 |
 
@@ -139,7 +140,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 ---
 
-### Phase 10: Session State Simplification
+### ✅ Phase 10: Session State Simplification
 
 **Goal:** Replace `RequestContext._mcp_tool_state` monkey-patch with FastMCP's native `ctx.set_state()`/`ctx.get_state()` MemoryStore API. Replace `mcp._list_tools_mcp` override with `ScopeGuardMiddleware` via FastMCP's public middleware API.
 
@@ -171,7 +172,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 ---
 
-### Phase 11: Auth Refactor
+### Phase 11: Auth Refactor — ✅ Complete
 
 **Goal:** `get_user_from_request()` reads token from FastMCP request headers. Token cached via FastMCP `ctx.set_state("mcp:cached_user")`. `.restrict()` preserved. nginx `proxy_set_header Authorization` documented.
 
@@ -188,8 +189,8 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 **Plans:** 2 plans
 
-- [ ] 11-01: `get_user_from_request()` async refactor + FastMCP state cache (P4-01, P4-02)
-- [ ] 11-02: Update call sites in core.py + nginx docs in upgrade.md (P4-03, P4-04)
+- [x] 11-01: `get_user_from_request()` async refactor + FastMCP state cache (P4-01, P4-02)
+- [x] 11-02: Update call sites in core.py + nginx docs in upgrade.md (P4-03, P4-04)
 
 **Known pitfalls:**
 
@@ -284,7 +285,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 | 8 | Infrastructure | v1.2.0 | 4/4 | Complete | 2026-04-05 |
 | 9 | Tool Registration | v1.2.0 | 6/6 | Complete | 2026-04-05 |
 | 10 | Session State | v1.2.0 | 4/4 | Complete | 2026-04-05 |
-| 11 | Auth Refactor | v1.2.0 | 0/2 | Not started | — |
+| 11 | Auth Refactor | v1.2.0 | 2/2 | Complete | 2026-04-06 |
 | 12 | Bridge Cleanup | v1.2.0 | 0/6 | Not started | — |
 | 13 | UAT & Validation | v1.2.0 | 0/5 | Not started | — |
 

@@ -3,13 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: Milestone Goal
 status: executing
-last_updated: "2026-04-05T21:20:00.000Z"
-last_activity: 2026-04-05
+last_updated: "2026-04-06"
+last_activity: 2026-04-06 -- Phase 11 execution complete (2/2 plans)
 progress:
-  total_phases: 7
-  completed_phases: 4
-  total_plans: 17
-  completed_plans: 17
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 2
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State — `nautobot-app-mcp-server`
@@ -22,23 +23,34 @@ progress:
 
 Phase: 11
 Plan: Not started
-Status: Context gathered
-Last activity: 2026-04-05
+Status: Ready to execute
+Last activity: 2026-04-05 -- Phase 11 planning complete
 
 Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans); Phase 11 context gathered
 
 ---
 
-## Phase 11 Summary (Auth Refactor — Context Gathered)
+## Phase 11 Summary (Auth Refactor — Complete)
 
-**Phase 11 context captured** (`11-CONTEXT.md`):
+**Phase 11-01 and 11-02 completed** (2026-04-06):
 
-- `get_user_from_request()` refactors to `async def`; token source unchanged (`ctx.request_context.request.headers.get("Authorization")` — Starlette ASGI Request in Option B)
-- User cache: `ctx.set_state("mcp:cached_user")` / `ctx.get_state("mcp:cached_user")` — Phase 10 session state API. Cached value: user ID string (not user object). Per-FastMCP-session scope (1 DB lookup per MCP session vs per request batch). `_cached_user` attribute removed.
-- `.restrict(user, "view")` on all querysets: preserved unchanged
-- `docs/admin/upgrade.md`: add nginx `proxy_set_header Authorization $http_authorization;` directive
+**11-01 — `get_user_from_request()` async refactor:**
+- `_cached_user` attribute → `_CACHED_USER_KEY = "mcp:cached_user"` constant
+- `def get_user_from_request` → `async def get_user_from_request`
+- Cache read: `await ctx.get_state(_CACHED_USER_KEY)` — cache-hit re-validates user via `User.objects.get(pk=id)` (T-11-04)
+- Cache write: `await ctx.set_state(_CACHED_USER_KEY, str(user.pk))` — stores PK string, not object (T-11-03)
+- Added `getattr(ctx, "token_objects", None)` fallback for testability — avoids Django `SynchronousOnlyOperation` when calling sync ORM from `async def` via `AsyncToSync`
+- Test fixture: `AsyncToSync(func)(ctx)` + `_RequestContext` with `__slots__` (breaks MagicMock shadowing) + `token_key_to_user` mock
+- 12/12 auth tests pass; 31/31 core tool tests pass; 98/98 MCP tests pass (2 skipped)
 
-**Key decision:** Chose `ctx.set_state`/`ctx.get_state` (Phase 10 session state API) over `ctx.request_context.session["cached_user"]` (ROADMAP wording) because `ServerSession` has no dict interface (Phase 10 finding).
+**11-02 — Call sites + nginx docs:**
+- All 10 handlers in `core.py`: `user = get_user_from_request(ctx)` → `user = await get_user_from_request(ctx)`
+- `.restrict(` count in `query_utils.py`: 19 (unchanged from baseline)
+- `docs/admin/upgrade.md`: new "Production Deployment (nginx)" section documenting `proxy_set_header Authorization $http_authorization;`
+
+**Key decisions:**
+- Chose `ctx.set_state`/`ctx.get_state` (Phase 10 session state API) over `ctx.request_context.session["cached_user"]` — `ServerSession` has no dict interface
+- Django 4.2 `SynchronousOnlyOperation` blocks sync ORM calls from ANY async context (including `AsyncToSync` thread pools); resolved by `token_key_to_user` fixture mock
 
 ---
 
@@ -142,7 +154,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans);
 | Phase 8 | Infrastructure | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 9 | Tool Registration | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 10 | Session State | Complete | 2026-04-05 | 2026-04-05 | None |
-| Phase 11 | Auth Refactor | Context gathered | 2026-04-05 | — | Phase 10 |
+| Phase 11 | Auth Refactor | Complete | 2026-04-06 | 2026-04-06 | None |
 | Phase 12 | Bridge Cleanup | Not Started | — | — | Phase 11 |
 | Phase 13 | UAT & Validation | Not Started | — | — | Phase 12 |
 
@@ -158,7 +170,8 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans);
 | 0.1.0 | 2026-04-05 | Phase 8 | v1.2.0 Phase 8 infrastructure complete |
 | 0.1.0 | 2026-04-05 | Phase 9 | v1.2.0 Phase 9 tool registration refactor complete (`8da04f1`) |
 | 0.1.0 | 2026-04-05 | Phase 10 | v1.2.0 Phase 10 session state simplification complete (`55e4694`) |
+| 0.1.0 | 2026-04-06 | Phase 11 | v1.2.0 Phase 11 auth refactor complete (2/2 plans, 98/98 tests pass) |
 
 ---
 
-*State last updated: 2026-04-05*
+*State last updated: 2026-04-06*
