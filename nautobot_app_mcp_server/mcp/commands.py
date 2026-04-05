@@ -68,7 +68,13 @@ def create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple:
         # FastMCP 3.x does NOT accept these in the constructor.
     )
 
-    # STEP 4: Phase 9 — wire register_all_tools_with_mcp() here.
-    # (Placeholder until Phase 9 lands.)
+    # STEP 4: Wire all registered tools to FastMCP.
+    # Importing nautobot_app_mcp_server.mcp.tools side-effects registration into
+    # MCPToolRegistry (via @register_tool on each core tool handler).
+    from nautobot_app_mcp_server.mcp.tools import core  # noqa: F401
+
+    from nautobot_app_mcp_server.mcp import register_all_tools_with_mcp
+
+    register_all_tools_with_mcp(mcp)
 
     return (mcp, host, port)

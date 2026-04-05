@@ -38,6 +38,7 @@ __all__ = [
     "MCPToolRegistry",
     "ToolDefinition",
     "get_user_from_request",
+    "register_all_tools_with_mcp",
     "register_mcp_tool",
     "register_tool",
 ]
@@ -146,3 +147,29 @@ def register_tool(
         return func
 
     return decorator
+
+
+def register_all_tools_with_mcp(mcp: Any) -> None:
+    """Register all tools from MCPToolRegistry with a FastMCP instance.
+
+    Called at MCP server startup (inside ``create_app()``) to attach every
+    tool that has been registered via :func:`register_mcp_tool` or
+    :func:`register_tool` to the live FastMCP instance.
+
+    FastMCP 3.x does NOT accept ``input_schema`` as a parameter to
+    ``mcp.tool()`` — the schema is auto-derived from the function's Python
+    type hints at decoration/wiring time. The ``input_schema`` stored in
+    MCPToolRegistry is for cross-process discovery (e.g. ``tool_registry.json``)
+    and is NOT passed to FastMCP here.
+
+    Args:
+        mcp: A FastMCP instance returned by ``FastMCP(...)``.
+
+    Note:
+        Must be called AFTER ``nautobot.setup()`` so that Django is bootstrapped
+        and lazy imports inside tool functions can succeed.
+    """
+    registry = MCPToolRegistry.get_instance()
+    for tool in registry.get_all():
+        # mcp.tool() is a decorator in FastMCP 3.x — call it with kwargs
+        mcp.tool(tool.func, name=tool.name, description=tool.description)
