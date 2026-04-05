@@ -1,581 +1,410 @@
-# Architecture Research — django-mcp-server Deep Dive
+# Architecture Research — Separate-Process MCP Server (Option B)
 
-**Domain:** Embedded FastMCP server in Django (WSGI→ASGI bridge, session persistence)
-**Researched:** 2026-04-03
-**Confidence:** HIGH (verified via direct source extraction from GitHub)
+**Domain:** FastMCP server as a standalone process integrated with Nautobot via `nautobot.setup()`
+**Researched:** 2026-04-05
+**Confidence:** HIGH (verified via source extraction from `nautobot-app-mcp` reference implementation)
 
-## Source
+## Context
 
-- Repo: `https://github.com/gts360/django-mcp-server` (fork of `omarbenhamid/django-mcp-server`)
-- Files read: `mcp_server/djangomcp.py`, `mcp_server/views.py`, `mcp_server/urls.py`
-- All quotes are verbatim from source; diagrams are reconstructed from code behavior
+This document is consumed by `gsd-roadmapper` to understand component responsibilities, build order, and what to implement in each phase of the v1.2.0 refactor from embedded (Option A) to separate-process (Option B).
+
+**Existing Option A (embedded):** FastMCP ASGI app runs inside Nautobot's Django process, bridged via `mcp_view` + `asyncio.run()`. This required 8 concurrency primitives, monkey-patching dataclass fields, and an override of FastMCP's private `_list_tools_mcp` API.
+
+**New Option B (separate-process):** FastMCP runs as a standalone process started by a Django management command. It calls `nautobot.setup()` once at worker startup to bootstrap the Django ORM. Tool handlers wrap ORM calls in `sync_to_async`. Session state lives in a plain dict keyed by FastMCP session ID.
 
 ---
 
-## 1. django-mcp-server Architecture
-
-### System Overview
+## Option A vs Option B: Structural Comparison
 
 ```
-MCPServerStreamableHttpView (DRF APIView — get/post/delete)
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    OPTION A — Embedded (current)                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Nautobot Django process                                                     │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │  mcp_view() [view.py]                                                │    │
+│  │    async_to_sync(_bridge_django_to_asgi)()                           │    │
+│  │      get_mcp_app() [lazy singleton, 3× double-checked locking]       │    │
+│  │        _ensure_lifespan_started()  ──► daemon thread: asyncio.Event()│    │
+│  │          run_lifespan()              keeps FastMCP loop alive forever │    │
+│  │        mcp_instance.http_app()                                        │    │
+│  │          Starlette ASGI app at /mcp/                                  │    │
+│  │                                                                            │
+│  │  server.py: _mcp_instance, _mcp_app, _lifespan_lock, _lifespan_guard │    │
+│  │            _app_lock, _lifespan_started — 6 module-level globals      │    │
+│  │                                                                            │
+│  │  session_tools.py: monkey-patches RequestContext._mcp_tool_state        │    │
+│  │  auth.py:         monkey-patches RequestContext._cached_user            │    │
+│  │  server.py:       overrides FastMCP._list_tools_mcp (private API)      │    │
+│  │                                                                            │
+│  │  Concurrency primitives: 1 threading.Lock + 1 asyncio.Lock           │    │
+│  │                          + 1 daemon thread + 1 Event.wait()             │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    OPTION B — Separate Process (target)                      │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Process 1: Nautobot Django  (port 8080, unchanged)                          │
+│  Process 2: FastMCP MCP Server (port 8005, separate)                         │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │  start_mcp_server.py / start_mcp_dev_server.py                        │    │
+│  │    nautobot.setup()  ──► bootstraps Django ORM once per worker        │    │
+│  │    FastMCP("NautobotMCP", port=8005)                                  │    │
+│  │    register_all_tools_with_mcp(mcp)  ──► registry.py decorators       │    │
+│  │    mcp.run(transport="sse")  /  mcp.sse_app() via uvicorn             │    │
+│  │                                                                            │
+│  │  Tool handlers (device_tools.py, etc.)                                  │    │
+│  │    @sync_to_async(thread_sensitive=True)                                │    │
+│  │    def get_device_details_sync(device_name):                            │    │
+│  │      return Device.objects.get(name=device_name)                        │    │
+│  │                                                                            │
+│  │  Session state: plain dict keyed by FastMCP session_id                  │    │
+│  │  Progressive disclosure: scope-guard decorator                          │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Option B System Overview
+
+```
+Startup (one-time per worker)
 │
-├── Django URL Router  →  path("mcp/", MCPServerStreamableHttpView.as_view(...))
+└─ start_mcp_server.py / start_mcp_dev_server.py
+       │
+       ├── nautobot.setup()         [Django ORM bootstrap]
+       │
+       ├── FastMCP("NautobotMCP", port=8005)  [FastMCP server instance]
+       │
+       ├── register_all_tools_with_mcp(mcp)  [registry.py → tool decorators]
+       │
+       └── mcp.run(transport="sse")  [production]  OR  mcp.sse_app() via uvicorn  [dev]
+
+Runtime (per MCP request)
 │
-├── MCPServerStreamableHttpView.get/post(request)
-│       │
-│       └── self.mcp_server.handle_django_request(request)
-│               │
-│               ├── Read Mcp-Session-Id header
-│               ├── Load Django SessionStore (or create new)
-│               ├── request.session = session
-│               │
-│               └── async_to_sync(_call_starlette_handler)(request, session_manager)
-│                       │
-│                       ├── django_request_ctx.set(django_request)  [contextvars]
-│                       ├── Build ASGI scope dict
-│                       ├── receive(): returns request body bytes
-│                       ├── send(): collects response_start + response_body
-│                       │
-│                       └── async with session_manager.run():
-│                               └── await session_manager.handle_request(scope, receive, send)
-│                                       │
-│                                       ├── FastMCP protocol handler
-│                                       ├── Server.request_context.set(ctx)  ← ACTIVE HERE
-│                                       │
-│                                       ├── POST /mcp/ tools/call  →  tool execution
-│                                       │       └── Server.request_context.get() → session → scopes
-│                                       │
-│                                       └── response assembled → send() called
-│
-└── On exit: session.save(); result.headers["Mcp-Session-Id"] = session_key
+└─ MCP client (Claude Code, Claude Desktop)
+       │
+       ├── HTTP POST /mcp/  ──► FastMCP HTTP handler
+       │         │
+       │         ├── Auth: extract Authorization: Token header
+       │         │           → Token.objects.select_related("user").get(key=...)
+       │         │           → user stored in per-session state dict
+       │         │
+       │         ├── Session: Mcp-Session-Id → in-memory sessions dict
+       │         │           → scope state: {"enabled_scopes": set(), "enabled_searches": set()}
+       │         │
+       │         ├── Tool dispatch: FastMCP → tool handler (sync_to_async wrapped)
+       │         │           → MCPToolRegistry.get_by_scope(scope) for progressive disclosure
+       │         │           → Django ORM: Device.objects.select_related(...).restrict(user)
+       │         │
+       │         └── HTTP response (JSON-RPC)
+       │
+       └── MCP client reads response
 ```
 
 ---
 
-## 2. Six Questions Answered from Source
+## Component Responsibilities
 
-### Q1: The Bridge — How `MCPServerStreamableHttpView` Handles a Django Request
-
-**File:** `mcp_server/views.py`
-
-```python
-@method_decorator(csrf_exempt, name='dispatch')
-class MCPServerStreamableHttpView(APIView):
-    mcp_server = global_mcp_server
-
-    def get(self, request, *args, **kwargs):
-        return self.mcp_server.handle_django_request(request)
-
-    def post(self, request, *args, **kwargs):
-        return self.mcp_server.handle_django_request(request)
-
-    def delete(self, request, *args, **kwargs):
-        self.mcp_server.destroy_session(request)
-        return HttpResponse(status=200, content="Session destroyed")
-```
-
-**File:** `mcp_server/djangomcp.py` — `handle_django_request()`
-
-```python
-def handle_django_request(self, request):
-    if not self.stateless:
-        session_key = request.headers.get(MCP_SESSION_ID_HDR)
-        if session_key:
-            session = self.SessionStore(session_key)
-            if session.exists(session_key):
-                request.session = session
-            else:
-                return HttpResponse(status=404, content="Session not found")
-        elif request.data.get('method') == 'initialize':
-            request.session = self.SessionStore()   # new session for initialize
-        else:
-            return HttpResponse(status=400, content="Session required for stateful server")
-
-    result = async_to_sync(_call_starlette_handler)(request, self.session_manager)
-
-    # Persist session after async call completes
-    if not self.stateless and hasattr(request, "session"):
-        request.session.save()
-        result.headers[MCP_SESSION_ID_HDR] = request.session.session_key
-        delattr(request, "session")
-
-    return result
-```
-
-**What it passes to the session manager:** `StreamableHTTPSessionManager(app=self._mcp_server, event_store=self._event_store, json_response=True, stateless=True)`. The session manager itself is passed as the second argument to `_call_starlette_handler`, which calls `session_manager.handle_request(scope, receive, send)` inside an `async with session_manager.run():` block.
-
-The Django `request.session` object is **pre-loaded** before calling the async handler. Django's session middleware has already deserialized the session from cookie/database. The `Mcp-Session-Id` header is the lookup key. The `request.session` object is passed to tools via `django_request_ctx.get()` (see Q4).
+| Component | Location | Responsibility | Implementation Pattern |
+|-----------|----------|----------------|----------------------|
+| **Management command (prod)** | `management/commands/start_mcp_server.py` | Bootstrap FastMCP worker: `nautobot.setup()` → register tools → `mcp.run(transport="sse")` | Django `BaseCommand`, reads plugin settings for host/port, `mcp.run()` blocks forever |
+| **Management command (dev)** | `management/commands/start_mcp_dev_server.py` | Dev worker with uvicorn auto-reload: `nautobot.setup()` → `create_app()` factory → `uvicorn.run(mcp.sse_app())` | Django `BaseCommand` + `create_app()` module-level factory for uvicorn reload detection |
+| **Tool registry** | `nautobot_mcp/tools/registry.py` | Register tools via `@register_tool` decorator; `discover_tools_from_directory()` for custom tools; `register_all_tools_with_mcp()` to wire all tools to FastMCP | Module-level `_tool_registry` dict; `MCPTool.objects` database persistence; `@mcp.tool()` applied during `register_all_tools_with_mcp()` |
+| **Tool implementations** | `nautobot_mcp/tools/device_tools.py` | Individual tool handlers; `sync_to_async` ORM wrappers; permission enforcement | `@register_tool` decorator + `sync_to_async` wrapper pattern; `select_related`/`prefetch_related` chains; `.restrict(user, action="view")` |
+| **Session state** | `MCPSessionState` (session_tools.py) | Per-session enabled_scopes + enabled_searches; keyed by FastMCP session ID in `StreamableHTTPSessionManager.sessions` dict | Plain Python dict, no monkey-patching of RequestContext; `_mcp_tool_state` dict on session, not on dataclass |
+| **Auth** | `get_user_from_request()` (auth.py) | Extract Token from MCP request context; cache on session dict; return `AnonymousUser` on failure | `ctx.request_context.request.headers["Authorization"]`; `Token.objects.select_related("user").get(key=...)`; `session["cached_user"]` cache |
+| **Cleanup (deleted)** | `view.py`, `server.py`, monkey-patches | WSGI→ASGI bridge, daemon lifespan thread, RequestContext monkey-patching | **Entirely removed** in Option B |
 
 ---
 
-### Q2: ASGI Scope Building
+## How Option B Integrates with Nautobot
 
-**File:** `mcp_server/djangomcp.py` — `_call_starlette_handler()`, lines 65–79
+### 1. `nautobot.setup()` — Django ORM Bootstrap
 
-```python
-scope: Scope = {
-    "type": "http",
-    "http_version": "1.1",
-    "method": django_request.method,
-    "headers": [
-                   (key.lower().encode("latin-1"), value.encode("latin-1"))
-                   for key, value in django_request.headers.items()
-                   if key.lower() != "content-length"
-               ] + [("Content-Length", str(len(body)).encode("latin-1"))],
-    "path": django_request.path,
-    "raw_path": django_request.get_full_path().encode("utf-8"),
-    "query_string": django_request.META["QUERY_STRING"].encode("latin-1"),
-    "scheme": "https" if django_request.is_secure() else "http",
-    "client": (django_request.META.get("REMOTE_ADDR"), 0),
-    "server": (django_request.get_host(), django_request.get_port()),
-}
-```
-
-| Field | Source | Notes |
-|-------|--------|-------|
-| `type` | Constant `"http"` | Required by ASGI spec |
-| `http_version` | Constant `"1.1"` | Could be `"1.0"` for HTTP/1.0 requests |
-| `method` | `django_request.method` | GET, POST, DELETE |
-| `headers` | `django_request.headers.items()` | Lowercased keys, `latin-1` encoded |
-| `path` | `django_request.path` | Full path including plugin prefix |
-| `raw_path` | `django_request.get_full_path().encode("utf-8")` | Path + query string as bytes |
-| `query_string` | `django_request.META["QUERY_STRING"].encode("latin-1")` | Raw query string bytes |
-| `scheme` | `django_request.is_secure()` ternary | `"https"` or `"http"` |
-| `client` | `django_request.META.get("REMOTE_ADDR")` | Tuple: (host, port=0) |
-| `server` | `(django_request.get_host(), django_request.get_port())` | Derived from Host header |
-
-**Note:** `root_path` is **not** included. The MCP path routing is handled by the session manager, not by path prefix stripping.
-
-**Current implementation vs. django-mcp-server:**
-```python
-# Current (BROKEN — asyncio.run destroys session):
-scope = {
-    "type": "http",
-    "asgi": {"version": "3.0"},
-    "http_version": "1.1",
-    "method": request.method,
-    "query_string": request.META.get("QUERY_STRING", "").encode("utf-8"),
-    "root_path": plugin_prefix,      # ← NOT in django-mcp-server
-    "path": mcp_path,                # ← Stripped prefix
-    "headers": [...],
-    "server": ("127.0.0.1", 8080),   # ← HARDCODED (should be request.get_host())
-}
-# asyncio.run(mcp_app(scope, receive, send))  ← WRONG
-
-# Should be:
-# async_to_sync(_call_starlette_handler)(request, session_manager)
-# Inside _call_starlette_handler, FastMCP routes via session_manager.handle_request()
-```
-
----
-
-### Q3: `async_to_sync` Usage
-
-**File:** `mcp_server/djangomcp.py`, `handle_django_request()` line:
+`nautobot.setup()` is called **once** at worker startup (inside the management command, before FastMCP is initialized):
 
 ```python
-result = async_to_sync(_call_starlette_handler)(request, self.session_manager)
+# start_mcp_dev_server.py — create_app()
+def create_app():
+    import nautobot
+    nautobot.setup()   # ← boots Django ORM, runs all app.ready() hooks
+
+    from mcp.server.fastmcp import FastMCP
+    from nautobot_mcp.tools.registry import register_all_tools_with_mcp
+
+    mcp = FastMCP("NautobotMCP", port=8005)
+    register_all_tools_with_mcp(mcp)
+    return mcp.sse_app()
 ```
 
-**The async function it calls — `_call_starlette_handler()`:**
+**What it does:** Initializes Django settings, registers all installed apps, runs migrations if needed, and prepares the ORM. After this call, `Device.objects`, `Token.objects`, etc. are fully usable from the same process.
+
+**Why it works as a separate process:** `nautobot.setup()` initializes Django in-process. The MCP server IS that process. No WSGI→ASGI bridge is needed because the MCP server is not embedded inside Nautobot's Django HTTP worker.
+
+### 2. `sync_to_async` ORM Wrappers
+
+All tool handlers use `sync_to_async` to call the Django ORM from within FastMCP's async event loop:
 
 ```python
-async def _call_starlette_handler(django_request, session_manager):
-    django_request_ctx.set(django_request)   # contextvars — accessible in sync tool calls
-    body = json.dumps(django_request.data, cls=DjangoJSONEncoder).encode("utf-8")
+# device_tools.py — pattern from nautobot-app-mcp reference
+from asgiref.sync import sync_to_async
 
-    scope: Scope = { ... }   # ASGI scope built from Django request
+@register_tool
+async def get_device_details(device_name: str) -> str:
+    @sync_to_async
+    def get_device_details_sync(device_name):
+        device = Device.objects.get(name=device_name)
+        # ... build response string ...
+        return device_info
 
-    async def receive() -> Receive:
-        return {
-            "type": "http.request",
-            "body": body,
-            "more_body": False,
-        }
-
-    response_started = {}
-    response_body = bytearray()
-
-    async def send(message: Send):
-        if message["type"] == "http.response.start":
-            response_started["status"] = message["status"]
-            response_started["headers"] = Headers(raw=message["headers"])
-        elif message["type"] == "http.response.body":
-            response_body.extend(message.get("body", b""))
-
-    async with session_manager.run():          # ← ENTERS FastMCP session context
-        await session_manager.handle_request(scope, receive, send)
-
-    status = response_started.get("status", 500)
-    headers = response_started.get("headers", {})
-    response = HttpResponse(bytes(response_body), status=status)
-    for key, value in headers.items():
-        response[key] = value
-    return response
+    return await get_device_details_sync(device_name)
 ```
 
-**Critical difference from current implementation:**
+**Key:** `thread_sensitive=True` is the default and correct choice — it runs the sync ORM code in the same thread that Django's database connection pool expects. Without it, the ORM calls may use a different thread, causing connection pool errors.
 
-```
-# Current (BROKEN):
-asyncio.run(mcp_app(scope, receive, send))
-  → Creates NEW event loop
-  → Executes mcp_app() coroutine
-  → CLOSES loop → destroys Server.request_context, session dict
-  → Next request: fresh loop, fresh session store, session state gone
+### 3. Session State as Normal Dict
 
-# django-mcp-server (CORRECT):
-async_to_sync(_call_starlette_handler)(request, session_manager)
-  → Uses existing event loop (or creates one on current thread, doesn't close it)
-  → session_manager.run() enters FastMCP's Server.request_context
-  → Server.request_context.get() works inside tool handlers
-  → Loop stays alive → session dict persists across requests
-```
-
-`asgiref.sync.async_to_sync` creates a new event loop only if one doesn't already exist on the thread, and it **does not close the loop after**. This preserves FastMCP's in-memory session store.
-
----
-
-### Q4: Session State Flow
-
-**Django-side session → MCP request context:**
+Option A monkey-patched `RequestContext._mcp_tool_state` and `RequestContext._cached_user`. Option B stores session state as a plain dict on FastMCP's built-in session object:
 
 ```python
-# djangomcp.py — django_request_ctx is a contextvars.ContextVar
-django_request_ctx = contextvars.ContextVar("django_request")
-
-# Stored at the start of _call_starlette_handler
-django_request_ctx.set(django_request)
-
-# Accessed in tool execution path via _ToolsetMethodCaller
-class _ToolsetMethodCaller:
-    def __call__(self, *args, **kwargs):
-        instance = self.class_(
-            context=kwargs[self.context_kwarg],
-            request=django_request_ctx.get(SimpleNamespace)   # ← gets Django request here
-        )
-        method = sync_to_async(_SyncToolCallWrapper(getattr(instance, self.method_name)))
-        return method(*args, **kwargs)
+# Inside a tool handler or session management utility
+async def _get_session_state(session_id: str) -> dict:
+    """Get or create session state dict keyed by FastMCP session_id."""
+    sessions = mcp.session_manager.sessions  # FastMCP's in-memory sessions dict
+    if session_id not in sessions:
+        sessions[session_id] = {"enabled_scopes": set(), "enabled_searches": set()}
+    return sessions[session_id]
 ```
 
-**MCP session state → FastMCP protocol:**
+No monkey-patching. No private API overrides. Session state is a normal dict keyed by FastMCP's `Mcp-Session-Id` header value.
 
-`StreamableHTTPSessionManager` stores FastMCP sessions in its own `self.sessions` dict (in-memory). The `Mcp-Session-Id` header (passed by the MCP client, NOT by django-mcp-server) is the FastMCP session key. The Django session is separate — it stores application-level data, not MCP protocol session data.
+### 4. Auth: Token from MCP Request Context
 
-django-mcp-server uses `stateless=True` on the session manager, meaning FastMCP does NOT manage its own session store. Instead, the Django `SessionStore` (cookie/database-backed) is the session store. On each request:
-1. `Mcp-Session-Id` header → load Django `SessionStore`
-2. `request.session` is the Django session
-3. FastMCP tool handlers access session data via `Server.request_context.get().session`
-
-**For nautobot-app-mcp-server:** Using `stateless_http=False` with `async_to_sync` means FastMCP's own in-memory `sessions` dict is the session store. State persists because the event loop is not destroyed. The `Mcp-Session-Id` header is managed by FastMCP's `StreamableHTTPSessionManager`.
-
----
-
-### Q5: How `Server.request_context.get()` Works Correctly
-
-**The key:** `async with session_manager.run():` + FastMCP's internal `Server.request_context.set(ctx)`.
-
-Inside `StreamableHTTPSessionManager.handle_request()`, FastMCP calls:
-```python
-async with self.run():
-    await self._mcp_server.run(...)   # protocol handler
-```
-
-The `self.run()` context manager sets `Server.request_context.set(ctx)` where `ctx` is a `RequestContext` containing the current `ServerSession`. This is what makes `Server.request_context.get()` return a valid object instead of raising `LookupError`.
-
-**How current implementation fails:**
+Auth still extracts the `Authorization: Token <hex>` header from the MCP request, but now uses FastMCP's native request object:
 
 ```python
-# Current: asyncio.run() destroys the context immediately after mcp_app() returns
-asyncio.run(mcp_app(scope, receive, send))
-# → mcp_app() calls session_manager.handle_request(scope, receive, send)
-# → Inside handle_request(), Server.request_context.set(ctx) is called
-# → But as soon as mcp_app() returns, asyncio.run() closes the loop
-# → Server.request_context ContextVar is cleared
-# → On next request: new loop → LookupError raised
+# auth.py — Option B pattern
+def get_user_from_request(ctx: ToolContext):
+    mcp_request = ctx.request_context.request
+    auth_header = mcp_request.headers.get("Authorization", "")
 
-# What happens inside progressive_list_tools_mcp:
-async def progressive_list_tools_mcp(request=None):
+    if not auth_header or not auth_header.startswith("Token "):
+        return AnonymousUser()
+
+    token_key = auth_header[6:]
+
+    # Check per-session cache
+    session = ctx.request_context.session
+    cached = session.get("cached_user")
+    if cached is not None:
+        return cached
+
     try:
-        req_ctx = Server.request_context.get()  # LookupError — every time!
-        ...
-    except LookupError:
-        pass  # falls through to empty session_dict
+        user = Token.objects.select_related("user").get(key=token_key).user
+    except Token.DoesNotExist:
+        return AnonymousUser()
+
+    session["cached_user"] = user
+    return user
 ```
 
-**Fix:** Use `async with session_manager.run():` + `async_to_sync`. The loop stays alive, `Server.request_context` ContextVar persists:
+The session is FastMCP's native session dict (not Django's `SessionStore`). Caching on the session avoids repeated DB lookups per request batch.
+
+### 5. Progressive Disclosure: Scope-Guard Decorator
+
+Option B replaces the private-API override `mcp._list_tools_mcp` with a straightforward scope-checking decorator:
 
 ```python
-async def _call_starlette_handler(django_request, session_manager):
-    ...
-    async with session_manager.run():
-        await session_manager.handle_request(scope, receive, send)
-    # Server.request_context.set(ctx) is active during the entire handle_request()
-    # → Server.request_context.get() works inside tool handlers
+# progressive_disclosure.py — Option B pattern (new file)
+from functools import wraps
+
+def scope_guard(allowed_scopes: set[str]):
+    """Decorator: skip tool if session doesn't have required scope."""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(ctx, *args, **kwargs):
+            session_state = _get_session_state_from_context(ctx)
+            if session_state.get("enabled_scopes", set()) & allowed_scopes:
+                return await func(ctx, *args, **kwargs)
+            return {"error": "scope not enabled"}
+        return wrapper
+    return decorator
 ```
 
-With this pattern, `progressive_list_tools_mcp` can successfully call `Server.request_context.get()` and get the real session (not a `LookupError`).
+FastMCP's `list_tools` returns the full tool manifest (all registered tools). Progressive disclosure in Option B is handled at the **tool handler level** (the tool returns an error if scope not enabled) rather than at the **manifest level** (filtering what appears in `tools/list`). This is simpler and avoids the private-API override.
 
 ---
 
-### Q6: Thread Safety — Singleton Initialization
+## Production vs Development Patterns
 
-**django-mcp-server approach:** Module-level plain singleton, not lazy.
-
-```python
-# djangomcp.py
-global_mcp_server = DjangoMCP(**getattr(settings, 'DJANGO_MCP_GLOBAL_SERVER_CONFIG', {}))
-```
-
-```python
-# views.py
-class MCPServerStreamableHttpView(APIView):
-    mcp_server = global_mcp_server   # class attribute, references same object
-```
-
-**Why this works for thread safety:** Django's WSGI workers either:
-- **Prefork mode (gunicorn workers):** Each worker is a separate OS process. No shared memory issues.
-- **Threaded mode:** The `global_mcp_server` is created once at module import (before workers fork), so all threads share the same object. No race condition because Python GIL makes the assignment atomic, and the object is immutable after creation.
-
-**nautobot-app-mcp-server's issue:** Lazy initialization (`get_mcp_app()` called on first request) with no lock. Two concurrent first requests (before `_mcp_app` is set) could both see `_mcp_app is None` and create duplicate instances. Only one survives (last write wins), but the wasted instance leaks.
-
-**Fix:** Add `threading.Lock` double-checked locking:
-```python
-import threading
-
-_lock = threading.Lock()
-
-def get_mcp_app() -> Starlette:
-    global _mcp_app
-    if _mcp_app is None:
-        with _lock:
-            if _mcp_app is None:   # double-check
-                mcp_instance = _setup_mcp_app()
-                _mcp_app = mcp_instance.http_app(...)
-    return _mcp_app
-```
+| Aspect | Production (`start_mcp_server.py`) | Development (`start_mcp_dev_server.py`) |
+|--------|-----------------------------------|----------------------------------------|
+| Transport | `mcp.run(transport="sse")` — FastMCP's built-in SSE server | `mcp.sse_app()` + `uvicorn.run()` — uvicorn with auto-reload |
+| Process management | `systemctl start nautobot-mcp` or Docker `command:` | `poetry run invoke start-mcp-dev` |
+| Auto-reload | No — production static binary | Yes — uvicorn `--reload` with `reload_dirs` including custom tools |
+| Host/port config | From `settings.PLUGINS_CONFIG["nautobot_mcp"]["MCP_HOST/PORT"]` | Default `127.0.0.1:8005` |
+| Custom tools | Via `MCP_CUSTOM_TOOLS_DIR` setting | Via `NAUTOBOT_MCP_CUSTOM_TOOLS_DIR` env var set inside command |
+| Logs | `nautobot_mcp.utilities.logger` → structured JSON | `print()` to terminal (stdout captured by uvicorn) |
 
 ---
 
-## 3. Component Responsibilities
+## Build Order
 
-| Component | File | Responsibility |
-|-----------|------|----------------|
-| **Django view (entry)** | `mcp_server/views.py` | Route GET/POST/DELETE; `@csrf_exempt`; DRF APIView |
-| **DjangoMCP (orchestrator)** | `mcp_server/djangomcp.py` | Session store init; `handle_django_request()`; DRF tool registration |
-| **`_call_starlette_handler`** | `mcp_server/djangomcp.py` | ASGI scope build; `async with session_manager.run()`; receive/send; `contextvars` for Django request |
-| **`StreamableHTTPSessionManager`** | `mcp.server.streamable_http_manager` (FastMCP) | Session lifecycle; `Server.request_context` context manager; protocol routing |
-| **`DjangoMCP.session_manager`** | Property in `DjangoMCP` | `StreamableHTTPSessionManager(app=self._mcp_server, stateless=True)` |
-| **`django_request_ctx`** | `contextvars.ContextVar` | Thread-safe carrier of Django request object into async/sync tool calls |
-| **`MCPToolset`** | `mcp_server/djangomcp.py` | Metaclass registry; auto-publishes public methods as MCP tools |
-| **`global_mcp_server`** | Module-level singleton | Module-level DjangoMCP instance, no lazy init, no lock needed |
-
----
-
-## 4. Data Flow: django-mcp-server vs. nautobot-app-mcp-server
+Dependencies dictate the following implementation order:
 
 ```
-# django-mcp-server (CORRECT)
+1.  start_mcp_server.py + start_mcp_dev_server.py
+    └─ Imports: nothing else from this app (just Django BaseCommand + FastMCP + registry)
+    └─ Must come FIRST: all downstream components depend on nautobot.setup() running first
 
-Django request
-    ↓
-MCPServerStreamableHttpView.get/post(request)
-    ↓
-DjangoMCP.handle_django_request(request)
-    ├── Read Mcp-Session-Id header → Django SessionStore
-    ├── request.session = session
-    ↓
-async_to_sync(_call_starlette_handler)(request, session_manager)
-    ├── django_request_ctx.set(request)         [contextvars]
-    ├── Build ASGI scope dict
-    ├── async def receive(): return {body}
-    ├── async def send(message): collect messages
-    ↓
-async with session_manager.run():               [ENTER Server.request_context]
-    await session_manager.handle_request(scope, receive, send)
-        ├── FastMCP protocol
-        ├── Server.request_context.set(ctx)     [ACTIVE HERE]
-        │
-        ├── tools/list → _list_tools_mcp → Server.request_context.get() ✓
-        │                    └── MCPToolRegistry.get_all() → filtered by session
-        │
-        └── tools/call → tool handler
-              ├── Server.request_context.get().session ✓
-              └── sync_to_async(tool_fn)()
-    ↓
-session.save()
-result.headers["Mcp-Session-Id"] = session.session_key
-    ↓
-Django HttpResponse
+2.  registry.py (nautobot_mcp/tools/registry.py)
+    └─ Imports: nothing from auth or session (standalone)
+    └─ Must come SECOND: tools need the registry to exist before they can register
+    └─ Tool implementations (device_tools.py etc.) depend on this for @register_tool
 
+3.  Tool implementations (device_tools.py, interface_tools.py, etc.)
+    └─ Depend on: registry.py (for @register_tool decorator)
+    └─ Depend on: nautobot.setup() having run (for Device, Interface, IPAddress models)
+    └─ Auth and session: accessed via FastMCP ToolContext, not imported directly
 
-# nautobot-app-mcp-server (BROKEN — asyncio.run)
+4.  session.py (new file — session state management)
+    └─ Depend on: FastMCP session dict access pattern
+    └─ Produces: MCPSessionState, _get_session_state(), scope-guard decorator
 
-Django request
-    ↓
-mcp_view(request)
-    ↓
-get_mcp_app()  →  mcp_instance.http_app(...)
-    ↓
-asyncio.run(mcp_app(scope, receive, send))     [WRONG: destroys loop]
-    ├── mcp_app() calls session_manager.handle_request()
-    │     └── Server.request_context.set(ctx)
-    ├── Server.request_context.get() → ✓ works INSIDE handle_request
-    │     └── progressive_list_tools_mcp → session → scopes ✓
-    │
-    └── asyncio.run() closes loop → Server.request_context cleared
-    ↓
-Next request: asyncio.run() creates NEW loop
-    └── Server.request_context.get() → LookupError ❌
-        └── session_dict = {} → empty scopes → all tools shown
+5.  auth.py (update — simplify from monkey-patch to session dict)
+    └─ Depend on: session.py (for session dict access)
+    └─ Produces: get_user_from_request() reading from FastMCP session dict
+
+6.  Cleanup (deletion phase — after all above are implemented and tested)
+    └─ Delete: mcp/view.py, mcp/server.py (bridge layer)
+    └─ Delete: monkey-patches in session_tools.py, auth.py
+    └─ Delete: mcp._list_tools_mcp override in server.py
+    └─ Delete: mcp/session_tools.py (replaced by session.py + FastMCP native)
+    └─ Delete: mcp/__init__.py register_mcp_tool re-exports (no longer needed)
 ```
 
 ---
 
-## 5. Key Code Patterns to Borrow
+## Migration Path: What Changes vs What Gets Deleted
 
-### Pattern 1: `async_to_sync` Bridge (FIX for `asyncio.run()`)
+### Files Modified (Option B reads)
 
-```python
-from asgiref.sync import async_to_sync
+| File | Action | Changes |
+|------|--------|---------|
+| `management/commands/start_mcp_server.py` | **New** | Production management command with `nautobot.setup()` + `mcp.run(transport="sse")` |
+| `management/commands/start_mcp_dev_server.py` | **New** | Dev management command with `create_app()` factory + uvicorn auto-reload |
+| `nautobot_mcp/tools/registry.py` | **New** | Tool registration, `discover_tools_from_directory()`, `register_all_tools_with_mcp()` |
+| `nautobot_mcp/tools/device_tools.py` | **New** | `get_device_details` with `sync_to_async` ORM wrapper (reference implementation) |
+| `nautobot_mcp/session.py` | **New** | `MCPSessionState`, `_get_session_state()`, progressive disclosure helpers |
+| `nautobot_mcp/auth.py` | **New / updated** | `get_user_from_request()` reading from FastMCP session dict cache |
+| `nautobot_mcp/__init__.py` | **Modified** | Remove embedded FastMCP wiring; keep plugin metadata only |
 
-async def _call_starlette_handler(django_request, session_manager):
-    """Bridge: Django request → ASGI → session_manager → Django response."""
-    scope = {
-        "type": "http",
-        "http_version": "1.1",
-        "method": django_request.method,
-        "headers": [
-            (key.lower().encode("latin-1"), value.encode("latin-1"))
-            for key, value in django_request.headers.items()
-            if key.lower() != "content-length"
-        ],
-        "path": django_request.path,
-        "raw_path": django_request.get_full_path().encode("utf-8"),
-        "query_string": django_request.META["QUERY_STRING"].encode("latin-1"),
-        "scheme": "https" if django_request.is_secure() else "http",
-        "client": (django_request.META.get("REMOTE_ADDR"), 0),
-        "server": (django_request.get_host(), django_request.get_port()),
-    }
+### Files Deleted (Option A only)
 
-    body = django_request.body  # raw bytes — use directly
+| File | Reason for Deletion |
+|------|---------------------|
+| `mcp/view.py` | WSGI→ASGI bridge not needed in separate process; FastMCP has its own HTTP handler |
+| `mcp/server.py` | `_setup_mcp_app()`, `get_mcp_app()`, daemon lifespan thread, `_ensure_lifespan_started()` — not needed |
+| `mcp/session_tools.py` | `MCPSessionState.from_session()` + `_get_tool_state()` monkey-patch patterns replaced by session.py |
+| `mcp/auth.py` | `get_user_from_request()` with `ctx.request_context._cached_user` monkey-patch replaced by auth.py |
+| `mcp/registry.py` | `MCPToolRegistry` singleton pattern replaced by `nautobot_mcp/tools/registry.py` |
+| `mcp/__init__.py` | `register_mcp_tool()` public API — replaced by `nautobot_mcp/tools/registry.py` |
+| `mcp/urls.py` | URL routing to `mcp_view` — no longer needed; MCP runs on separate port |
+| `mcp/tests/test_view.py` | Tests for the ASGI bridge — not applicable to separate process |
+| `mcp/tests/test_session_persistence.py` | Tests relying on `mcp_view` + session manager — re-implement as integration tests against management command |
 
-    async def receive():
-        return {"type": "http.request", "body": body, "more_body": False}
+### Files Preserved (shared between Option A and Option B)
 
-    response_started = {}
-    response_body = bytearray()
-
-    async def send(message):
-        if message["type"] == "http.response.start":
-            response_started["status"] = message["status"]
-            response_started["headers"] = message["headers"]
-        elif message["type"] == "http.response.body":
-            response_body.extend(message.get("body", b""))
-
-    async with session_manager.run():
-        await session_manager.handle_request(scope, receive, send)
-
-    return response_body, response_started.get("status", 200), response_started.get("headers", [])
-
-
-def handle_django_request(request):
-    session_manager = get_session_manager()   # from server.py
-    body, status, headers = async_to_sync(_call_starlette_handler)(request, session_manager)
-    response = HttpResponse(bytes(body), status=status)
-    for k, v in headers:
-        response[bytes(k).decode()] = bytes(v).decode()
-    return response
-```
-
-### Pattern 2: `session_manager.run()` Context Manager (makes `Server.request_context` work)
-
-```python
-# Inside _call_starlette_handler (async function):
-async with session_manager.run():
-    await session_manager.handle_request(scope, receive, send)
-# session_manager.run() sets Server.request_context for the duration of handle_request()
-# All tool handlers called within handle_request() can use Server.request_context.get()
-```
-
-### Pattern 3: Thread-Safe Lazy Singleton
-
-```python
-import threading
-
-_mcp_app: Starlette | None = None
-_lock = threading.Lock()
-
-def get_mcp_app() -> Starlette:
-    global _mcp_app
-    if _mcp_app is None:
-        with _lock:
-            if _mcp_app is None:   # double-checked locking
-                mcp_instance = _setup_mcp_app()
-                _mcp_app = mcp_instance.http_app(...)
-    return _mcp_app
-```
-
-### Pattern 4: Deriving Server Address from Request
-
-```python
-"server": (django_request.get_host(), django_request.get_port()),
-"scheme": "https" if django_request.is_secure() else "http",
-"client": (django_request.META.get("REMOTE_ADDR"), 0),
-```
+| File | Reason for Preservation |
+|------|-------------------------|
+| `mcp/tools/core.py` | Core read tools (device_list, interface_list, etc.) — port to Option B pattern (`sync_to_async` + `session` dict) |
+| `mcp/tools/pagination.py` | `paginate_queryset()` — no FastMCP dependencies; purely ORM |
+| `mcp/tools/query_utils.py` | Query-building helpers — no FastMCP dependencies |
+| `mcp/tests/test_core_tools.py` | Port to Option B auth/session mocking patterns |
+| `mcp/tests/test_auth.py` | Port to Option B session dict patterns |
 
 ---
 
-## 6. Integration Points
+## Anti-Patterns
 
-### External vs. Internal in django-mcp-server
+### Anti-Pattern: Calling `nautobot.setup()` Per Request
 
-| Boundary | Communication | django-mcp-server pattern |
-|----------|---------------|---------------------------|
-| `MCPServerStreamableHttpView` → `DjangoMCP` | Method call: `handle_django_request(request)` | View calls orchestrator |
-| `DjangoMCP` → `_call_starlette_handler` | `async_to_sync()` | Bridges WSGI → ASGI |
-| `_call_starlette_handler` → `StreamableHTTPSessionManager` | `session_manager.run()` + `handle_request()` | Enters FastMCP protocol context |
-| `StreamableHTTPSessionManager` → `FastMCP` | FastMCP internal | `Server.request_context.set()` called here |
-| Tool handler → Django request | `django_request_ctx.get()` | `contextvars` carries Django request to async tools |
+**What people do:** Put `nautobot.setup()` inside the request handler (tool execution path).
 
-### What Changes in nautobot-app-mcp-server
+**Why it's wrong:** `nautobot.setup()` initializes Django settings, runs app discovery, and sets up the ORM connection pool. Doing this on every request is expensive (hundreds of milliseconds) and causes connection pool churn.
 
-| File | Change | Why |
-|------|--------|-----|
-| `mcp/view.py` | Replace `asyncio.run()` with `async_to_sync(_call_starlette_handler)(request, session_manager)` | Fixes session persistence |
-| `mcp/view.py` | Build ASGI scope using `request.get_host()` / `request.get_port()` | Correct server address |
-| `mcp/view.py` | Use `async with session_manager.run():` wrapper | Makes `Server.request_context.get()` work |
-| `mcp/server.py` | Add `threading.Lock` double-checked locking in `get_mcp_app()` | Fixes singleton race condition |
-| `mcp/server.py` | Expose `get_session_manager()` for view.py | Session manager from server.py to view.py |
+**Do this instead:** Call `nautobot.setup()` exactly once at worker startup, inside the management command's `handle()` or the `create_app()` factory. After that, the ORM is ready for all subsequent requests.
 
----
+### Anti-Pattern: Using `asyncio.run()` in a Tool Handler
 
-## 7. Anti-Patterns Confirmed by Source
+**What people do:** Calling `asyncio.run(some_async_fn())` inside an async tool handler to run async ORM wrappers.
 
-### Anti-Pattern: `asyncio.run()` in a WSGI Django view
+**Why it's wrong:** `asyncio.run()` creates and destroys a new event loop on every call. This breaks FastMCP's internal context (event loop state, session dict). In Option B (separate process), FastMCP owns the one true event loop — calling `asyncio.run()` from within it creates a nested loop that orphan tasks.
 
-**Why it breaks:** `asyncio.run()` creates a new loop, runs the coroutine, then **closes the loop**. This destroys:
-1. FastMCP's `Server.request_context` ContextVar (set during `handle_request`)
-2. FastMCP's in-memory `sessions` dict (same-process, same-loop sessions)
-3. Any `contextvars.ContextVar` set inside the async code
+**Do this instead:** Use `sync_to_async` for sync ORM calls (the standard pattern). If you need to run async code from a sync context, use `anyio.run()` which also respects the existing loop. Never use `asyncio.run()` inside FastMCP.
 
-**Confirmed by:** `django-mcp-server` explicitly uses `async_to_sync` and `async with session_manager.run()` — never `asyncio.run()` inside a Django request handler.
+### Anti-Pattern: Storing State on `ServerSession`
 
-### Anti-Pattern: Accessing `Server.request_context` without `session_manager.run()`
+**What people do (Option A):** `session["enabled_scopes"] = {...}` where `session` is FastMCP's `ServerSession`.
 
-**Confirmed by:** FastMCP's `Server.request_context` is a `ContextVar` (not a global). It is only set when inside `session_manager.run()`. Calling `Server.request_context.get()` outside that context manager raises `LookupError`. The current `progressive_list_tools_mcp` hits this on every request.
+**Why it's wrong (Option A):** FastMCP's `ServerSession` is NOT dict-like — it has no `__setitem__`. Writes to it are silently lost. Option A worked around this by storing on `RequestContext._mcp_tool_state` (monkey-patching a dataclass field).
+
+**Do this instead (Option B):** FastMCP's `StreamableHTTPSessionManager` manages real Python dict sessions in `self.sessions`. Access it via `ctx.request_context.session` which IS a dict in Option B. No monkey-patching needed.
+
+### Anti-Pattern: Private-API Override of `mcp._list_tools_mcp`
+
+**What people do (Option A):** `mcp._list_tools_mcp = progressive_list_tools_mcp` to filter tools in the manifest.
+
+**Why it's wrong:** `_list_tools_mcp` is a private FastMCP method (underscore prefix). It may change or be removed in any FastMCP version. The override pattern relies on FastMCP internals that are not part of the public API.
+
+**Do this instead (Option B):** Progressive disclosure at the **tool execution level** (scope-guard decorator returns an error if scope not enabled) rather than at the **manifest level**. This is simpler, uses only public APIs, and gives the AI agent clear error messages.
 
 ---
 
-## 8. Sources
+## Integration Points
 
-- `mcp_server/djangomcp.py` — `DjangoMCP.handle_django_request()`, `_call_starlette_handler()`, `StreamableHTTPSessionManager` usage (source: `gh api repos/gts360/django-mcp-server/contents/mcp_server/djangomcp.py | jq -r '.content' | base64 -d`)
-- `mcp_server/views.py` — `MCPServerStreamableHttpView` (source: `gh api repos/gts360/django-mcp-server/contents/mcp_server/views.py | jq -r '.content' | base64 -d`)
-- `mcp_server/urls.py` — URL routing with DRF authentication classes (source: `gh api repos/gts360/django-mcp-server/contents/mcp_server/urls.py | jq -r '.content' | base64 -d`)
-- `docs/dev/mcp-implementation-analysis.md` — existing analysis of session state issues
-- `nautobot_app_mcp_server/mcp/server.py` — current broken implementation
-- `nautobot_app_mcp_server/mcp/view.py` — current broken asyncio.run() bridge
+### External Services
+
+| Service | Integration Pattern | Notes |
+|---------|---------------------|-------|
+| **Nautobot ORM** | `nautobot.setup()` at startup, then direct `from nautobot.dcim.models import Device` | Only one `nautobot.setup()` call per worker lifetime |
+| **Nautobot settings** | `from django.conf import settings` — reads `PLUGINS_CONFIG["nautobot_mcp"]` | Used for host, port, custom tools dir, core tools toggle |
+| **Nautobot token auth** | `from nautobot.users.models import Token` — `Token.objects.select_related("user").get(key=token_key)` | Token keys are 40-char hex, no prefix |
+| **FastMCP HTTP transport** | `mcp.run(transport="sse")` (prod) or `mcp.sse_app()` + uvicorn (dev) | Separate port from Nautobot (default 8005) |
+| **Claude Code / Claude Desktop** | MCP client connects to `http://host:8005/mcp/` with `Authorization: Token <key>` | Standard MCP Streamable HTTP |
+
+### Internal Boundaries
+
+| Boundary | Communication | Option B Pattern |
+|----------|---------------|------------------|
+| Management command → Tool registry | Function call: `register_all_tools_with_mcp(mcp)` | Management command imports registry, calls registration function |
+| Registry → Tool implementations | Decorator import side-effect: `@register_tool` on each tool function | Tools are imported by `discover_tools()` in registry, decorators register to `_tool_registry` dict |
+| FastMCP → Tool handler | `mcp.tool()(func)` registers; FastMCP calls `func(ctx, **kwargs)` | FastMCP owns the event loop; tool handlers use `sync_to_async` for ORM |
+| Tool handler → Auth | `get_user_from_request(ctx)` called at top of each tool | Reads `ctx.request_context.request.headers["Authorization"]`, caches on `ctx.request_context.session["cached_user"]` |
+| Tool handler → Session | `_get_session_state(ctx)` | Reads from `ctx.request_context.session` dict (FastMCP's native session, not Django's) |
+| Tool handler → ORM | `sync_to_async(fn, thread_sensitive=True)` | Runs sync ORM calls in Django's expected thread; returns awaitable to FastMCP |
 
 ---
-*Architecture research for: django-mcp-server → nautobot-app-mcp-server refactor*
-*Researched: 2026-04-03*
+
+## Sources
+
+- `nautobot-app-mcp/nautobot_mcp/management/commands/start_mcp_server.py` — production management command pattern
+- `nautobot-app-mcp/nautobot_mcp/management/commands/start_mcp_dev_server.py` — development command + `create_app()` factory
+- `nautobot-app-mcp/nautobot_mcp/tools/registry.py` — `@register_tool` decorator, `register_all_tools_with_mcp()`, `discover_tools_from_directory()`
+- `nautobot-app-mcp/nautobot_mcp/tools/device_tools.py` — `sync_to_async` ORM wrapper pattern, `asgiref.sync.sync_to_async`
+- `nautobot_app_mcp_server/mcp/server.py` — current Option A implementation (to be deleted)
+- `nautobot_app_mcp_server/mcp/view.py` — current Option A ASGI bridge (to be deleted)
+- `nautobot_app_mcp_server/mcp/session_tools.py` — current Option A session state (to be replaced by `session.py`)
+- `nautobot_app_mcp_server/mcp/auth.py` — current Option A auth with monkey-patch (to be simplified)
+- `nautobot_app_mcp_server/mcp/registry.py` — current Option A `MCPToolRegistry` singleton (to be replaced by `nautobot_mcp/tools/registry.py`)
+- `nautobot_app_mcp_server/.planning/PROJECT.md` — v1.2.0 milestone context
+- `nautobot_app_mcp_server/.planning/ROADMAP.md` — Phase 5/6 requirements traceability
+
+---
+*Architecture research for: Option B separate-process MCP server refactor*
+*Researched: 2026-04-05*

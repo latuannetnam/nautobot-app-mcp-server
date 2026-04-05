@@ -1,298 +1,456 @@
-# Pitfalls Research — Django WSGI → FastMCP ASGI Bridge
+# Pitfalls Research — Adding a Separate-Process MCP Server to Nautobot Apps
 
-**Domain:** Django→FastMCP bridge implementation (WSGI to ASGI)
-**Researched:** 2026-04-03
+**Domain:** Nautobot App + FastMCP separate-process architecture migration
+**Researched:** 2026-04-05
 **Confidence:** HIGH
-**Driven by:** django-mcp-server source analysis + mcp-server SDK source reading + current codebase bugs
+**Driven by:** `docs/dev/ARCHITECTURE.md` (standalone verification), `docs/dev/mcp-implementation-analysis.md`, `ROADMAP.md`, current codebase state
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: `asyncio.run()` Destroys FastMCP Session State on Every Request
+### Pitfall 1: `nautobot.setup()` Called After Model Imports
 
 **What goes wrong:**
-Every HTTP request calls `asyncio.run(mcp_app(scope, receive, send))`. `asyncio.run()` creates a **new event loop**, executes the coroutine, then **closes and destroys the loop** when the coroutine returns. FastMCP's `StreamableHTTPSessionManager._server_instances` dict (which holds session transports keyed by `Mcp-Session-Id`) lives inside that loop's task group. Once the loop is closed, the session store is gone.
+The MCP server fails to start with `RuntimeError: Django wasn't set up yet. Run nautobot.setup() first.`
 
-Effect: `stateless_http=False` is set but sessions never survive between requests. The `Mcp-Session-Id` header from the MCP client is ignored because FastMCP's session manager has no existing loop to look it up in.
-
-**Why it happens:**
-`asyncio.run()` is designed for top-level entry points (CLI scripts, `main()`). It intentionally tears down the event loop after each call. When used inside a Django view (which itself runs inside Django's request thread), each request gets a fresh loop that is immediately discarded.
-
-The correct pattern (from django-mcp-server) is `asgiref.sync.async_to_sync`:
+If `nautobot.setup()` is called inside `__init__.py` at import time, and `__init__.py` is imported before Django is initialized (e.g., by another plugin's `ready()` hook that triggers a side-effect import), the setup call happens too early. Alternatively, if model imports happen before `nautobot.setup()`:
 
 ```python
-# WRONG — current implementation (view.py line 61)
-asyncio.run(mcp_app(scope, receive, send))
-
-# CORRECT — django-mcp-server pattern
-from asgiref.sync import async_to_sync
-result = async_to_sync(_call_starlette_handler)(request, self.session_manager)
-```
-
-`async_to_sync` reuses or creates a loop on the **current thread without destroying it**, keeping the session manager alive across multiple requests on the same thread.
-
-**How to avoid:**
-Replace `asyncio.run()` with `async_to_sync` wrapping the ASGI call. However, FastMCP's `http_app()` is a Starlette app that uses `session_manager.run()` (an async context manager that must be entered once at startup). The correct architecture is:
-
-```python
-# Pattern from django-mcp-server djangomcp.py
-async def _call_starlette_handler(django_request, session_manager):
-    scope = build_asgi_scope(django_request)
-    async def receive(): ...
-    async def send(message): ...
-    async with session_manager.run():          # ← enters task group ONCE
-        await session_manager.handle_request(scope, receive, send)
-    return django_response
-
-# In view / handle_django_request:
-result = async_to_sync(_call_starlette_handler)(request, self.session_manager)
-```
-
-The key insight: `session_manager.run()` must be entered **once** when the Django process starts, not per-request. In django-mcp-server this is done by calling `session_manager.run()` inside the Starlette app's lifespan context manager (which outlives individual requests).
-
-**Warning signs:**
-- `Mcp-Session-Id` header sent by client is never recognized on subsequent requests
-- `mcp_enable_tools()` appears to work (returns success) but `mcp_list_tools()` shows nothing changed
-- FastMCP logs show "Creating new transport" on every single request
-- `StreamableHTTPSessionManager._server_instances` is always empty after each request
-
-**P0 — Addressed in:** v1.1.0 refactor (`view.py` asyncio.run → async_to_sync)
-
----
-
-### Pitfall 2: `Server.request_context.get()` Raises `LookupError` on Every Request
-
-**What goes wrong:**
-The `_list_tools_mcp` override in `server.py` tries to access FastMCP's internal `Server.request_context` context variable:
-
-```python
-from mcp.server.lowlevel.server import Server
-req_ctx = Server.request_context.get()  # ← LookupError
-```
-
-This raises `LookupError` on **every production request** (not just in tests), because `Server.request_context` is `mcp.server.lowlevel.server.request_ctx` — a `contextvars.ContextVar` that is only set by `MCPServer._handle_request()` when processing an MCP protocol message inside the task group created by `session_manager.run()`.
-
-When using `asyncio.run()`, no persistent task group exists, so `_handle_request()` is never called in a context where `request_ctx` is set. The `LookupError` is silently caught and `session_dict` falls back to `{}`, causing `MCPSessionState.from_session({})` to produce empty state.
-
-**Why it happens:**
-`Server.request_context` is a **context variable**, not a global. It is set in `_handle_request()` (line 746 of mcp/server/lowlevel/server.py):
-
-```python
-token = request_ctx.set(RequestContext(...))
-try:
-    response = await handler(req)
-finally:
-    if token is not None:
-        request_ctx.reset(token)
-```
-
-This only happens when the server's message loop is running. With `asyncio.run()` creating a new loop per request, the message loop doesn't survive long enough to set the context variable before the `_list_tools_mcp` call happens.
-
-**How to avoid:**
-Fix #1 (replacing `asyncio.run()`) is a prerequisite. Once the session manager's task group persists across requests, `Server.request_context` is set during message processing.
-
-For code that runs *outside* the message loop (tests, management commands), access `Server.request_context` via a try/except and fall back gracefully:
-
-```python
-try:
-    ctx = Server.request_context.get()
-    session = ctx.session
-except LookupError:
-    # Outside live request — use full tool list or mock session
-    session = {}
-```
-
-The existing code already does this, but the fallback was returning empty state even in production because `asyncio.run()` meant the context was never set even during live requests.
-
-**Warning signs:**
-- `LookupError` silently caught in `_list_tools_mcp` override
-- `filtered_names_set` always empty → `_list_tools_mcp` returns empty tool list or all tools
-- `MCPSessionState.from_session({})` fires in production (detectable via logging)
-- Unit tests pass because they mock the session dict, but integration tests fail
-
-**P0 — Addressed in:** v1.1.0 refactor (fixes asyncio.run() prerequisite, then `Server.request_context` works)
-
----
-
-### Pitfall 3: FastMCP's `StreamableHTTPSessionManager.run()` Must Be Entered Once at Startup
-
-**What goes wrong:**
-Calling `session_manager.run()` **inside** the per-request async call (as opposed to at app startup) causes a `RuntimeError`:
-
-```
-RuntimeError: StreamableHTTPSessionManager .run() can only be called once per instance.
-Create a new instance if you need to run again.
-```
-
-This happens because `StreamableHTTPSessionManager.run()` uses `_has_started` to guard against re-entry (line 104–111 of mcp/server/streamable_http_manager.py):
-
-```python
-async with self._run_lock:
-    if self._has_started:
-        raise RuntimeError(".run() can only be called once per instance")
-    self._has_started = True
-```
-
-If you enter the context manager and then try to call `handle_request()` again from outside it (or enter it twice), the error fires.
-
-**Why it happens:**
-django-mcp-server avoids this by:
-1. Creating a new `StreamableHTTPSessionManager` instance **per FastMCP server instance** (module-level singleton)
-2. Calling `session_manager.run()` inside the Starlette app's **lifespan** context manager (which is entered once at server startup, exits at shutdown)
-
-django-mcp-server creates the `session_manager` as a `@property` on `DjangoMCP`, but the Starlette app's lifespan wraps `session_manager.run()`:
-
-```python
-@asynccontextmanager
-async def lifespan(app):
-    async with server._lifespan_manager(), session_manager.run():
-        yield
-```
-
-**How to avoid:**
-Use one of these two approaches:
-
-**Option A (django-mcp-server pattern):** Keep `StreamableHTTPSessionManager` alive via Starlette lifespan. The FastMCP `http_app()` already creates a `StreamableHTTPASGIApp` wrapping a session manager, but the session manager's `run()` is entered inside Starlette's lifespan. In this pattern, the Django view doesn't call `session_manager.run()` at all — it just calls `session_manager.handle_request()` inside an existing lifespan context.
-
-**Option B (if bridging manually):** Call `session_manager.run()` once at process startup (e.g., in Django's `AppConfig.ready()`) and keep the manager instance as a module-level singleton:
-
-```python
-# At module level — manager created once at import/lazy-init
-_session_manager: StreamableHTTPSessionManager | None = None
-
-def get_session_manager() -> StreamableHTTPSessionManager:
-    global _session_manager
-    if _session_manager is None:
-        _session_manager = StreamableHTTPSessionManager(
-            app=get_mcp_server()._mcp_server,
-            json_response=True,
-            stateless=False,
-        )
-    return _session_manager
-```
-
-Then in the view, use `async_to_sync` to call `handle_request` inside an existing task group:
-
-```python
-async def _handle(scope, receive, send):
-    async with get_session_manager().run():  # ← this must survive across requests
-        await get_session_manager().handle_request(scope, receive, send)
-
-# This STILL has the problem of re-entering .run() on every call.
-# The correct approach is to keep .run() always active.
-```
-
-The **correct** approach for manual bridging: create the session manager with a **persistent task group** using `anyio.create_task_group()` started once, and route requests into it.
-
-**Warning signs:**
-- `RuntimeError: StreamableHTTPSessionManager .run() can only be called once per instance`
-- `RuntimeError: Task group is not initialized. Make sure to use run().`
-
-**P0 — Addressed in:** v1.1.0 refactor (adopt django-mcp-server pattern: lifespan-managed session manager)
-
----
-
-### Pitfall 4: FastMCP Lifespan Must Be Wired to the ASGI App's Lifespan
-
-**What goes wrong:**
-When FastMCP's `http_app()` is used as a pure ASGI callable (without its lifespan), `StreamableHTTPSessionManager.run()` is never entered, so the task group is never created. Calling `handle_request()` then raises:
-
-```
-RuntimeError: Task group is not initialized. Make sure to use run().
-```
-
-FastMCP's `StreamableHTTPASGIApp.__call__` (http.py line 38–61) catches this and raises a helpful error:
-
-```
-FastMCP's StreamableHTTPSessionManager task group was not initialized.
-This commonly occurs when the FastMCP application's lifespan is not passed
-to the parent ASGI application (e.g., FastAPI or Starlette).
-Please ensure you are setting `lifespan=mcp_app.lifespan` in your parent
-app's constructor.
+# WRONG — model imported before setup
+from nautobot.dcim.models import Device  # ← raises if Django not set up
+nautobot.setup()
 ```
 
 **Why it happens:**
-`create_streamable_http_app()` in FastMCP's http.py (line 365–368) creates a lifespan that wraps both `server._lifespan_manager()` AND `session_manager.run()`:
-
-```python
-@asynccontextmanager
-async def lifespan(app):
-    async with server._lifespan_manager(), session_manager.run():
-        yield
-```
-
-If you import and call the ASGI app directly without Starlette routing this lifespan context, the lifespan never fires.
+`nautobot.setup()` checks `django._setup` (a sentinel boolean). If any model class or Django model metaclass is accessed before this flag is set, Django raises `SynchronousOnlyOperation`. The Python import system means any `from x.models import Y` triggers Django model class construction, which requires `django.setup()` to have already run.
 
 **How to avoid:**
-Never call `mcp.http_app()` ASGI app directly without Starlette's lifespan context. Always mount it as a Starlette app with its lifespan properly wired, OR use the pattern where `handle_request` is called inside an active `session_manager.run()` context (Option B above).
+Follow the reference architecture's `main.py` pattern — `nautobot.setup()` at the **top of the entry point**, before any relative imports from the package:
 
-The current `nautobot-app-mcp-server` calls `mcp_app(scope, receive, send)` directly as a plain ASGI callable — bypassing the lifespan. This is the root cause of the `asyncio.run()` problem and the session state loss.
-
-**Warning signs:**
-- `RuntimeError: Task group is not initialized` when calling `handle_request()`
-- ASGI app works once but sessions never survive
-- FastMCP logs: "StreamableHTTP session manager started" never appears
-
-**P0 — Addressed in:** v1.1.0 refactor (wire FastMCP lifespan into Django's request lifecycle)
-
----
-
-### Pitfall 5: Thread-Unsafe `_mcp_app` Singleton
-
-**What goes wrong:**
 ```python
-global _mcp_app
-if _mcp_app is None:          # ← Two threads can both pass this
-    mcp_instance = _setup_mcp_app()
-    _mcp_app = mcp_instance.http_app(...)  # ← second write wins, first leaked
+# main.py — entry point, first line of user-facing code
+import nautobot
+nautobot.setup()  # Must be the very first thing
+
+# Only NOW safe to import models
+from nautobot.dcim.models import Device  # ✅
 ```
 
-Django's threaded workers can handle concurrent requests. Two threads hitting `get_mcp_app()` simultaneously during startup can create duplicate FastMCP instances.
-
-**How to avoid:**
-Use double-checked locking with `threading.Lock`:
-
+If `__init__.py` must call `nautobot.setup()`, guard it to run exactly once:
 ```python
-import threading
-_lock = threading.Lock()
-
-def get_mcp_app() -> Starlette:
-    global _mcp_app
-    if _mcp_app is None:
-        with _lock:
-            if _mcp_app is None:  # Second check inside lock
-                _mcp_app = _setup_mcp_app()
-    return _mcp_app
+# __init__.py — only run if called as entry point
+import sys
+if __name__ == "__main__" or getattr(sys, '_nautobot_mcp_setup', False):
+    import nautobot
+    nautobot.setup()
 ```
 
 **Warning signs:**
-- Two `_setup_mcp_app()` calls in logs during startup under load
-- Resource exhaustion if `_setup_mcp_app()` opens connections
-- Intermittent test failures with duplicate registrations
+- `RuntimeError: Django wasn't set up yet` at import or startup
+- Model import errors in the traceback when running `nautobot-server start_mcp_server`
+- Container fails to start with no useful logs (Django import errors swallowed)
 
-**P1 — Addressed in:** v1.1.0 refactor (thread lock on `get_mcp_app()`)
+**Phase to address:** Phase 0 (Project Setup)
 
 ---
 
-### Pitfall 6: `MCPSessionState` Written to Server Session But Never Survives a Request
+### Pitfall 2: `DJANGO_SETTINGS_MODULE` / `NAUTOBOT_CONFIG` Misconfigured
 
 **What goes wrong:**
-Even if `mcp_enable_tools` successfully writes to `session["enabled_scopes"]`, the write is made to the in-memory dict inside `StreamableHTTPSessionManager._server_instances[session_id]`. When `asyncio.run()` tears down the loop, the transport (and its session dict) are destroyed. The next request creates a new transport with a fresh empty session dict.
+`nautobot.setup()` silently uses the wrong config (or falls back to a minimal Django settings) and the MCP server connects to the wrong database — or a database with no schema at all (empty tables). Tools return data from a different Nautobot instance, or fail with `relation does not exist`.
 
 **Why it happens:**
-This is a compound effect of Pitfall 1. With `async_to_sync` (fixing Pitfall 1), the task group survives across requests and the session dict is persistent. With `asyncio.run()`, it is not.
+`nautobot.setup()` reads `NAUTOBOT_CONFIG` env var, falling back to `~/.nautobot/nautobot_config.py`. If neither is set, it falls back to Django defaults, which connect to `localhost:5432` with no schema. The MCP server silently starts against the wrong DB.
+
+Production Docker deployment also needs `NAUTOBOT_CONFIG` pointing to the same `nautobot_config.py` that Nautobot itself uses.
 
 **How to avoid:**
-Fixing Pitfall 1 solves this. The session dict lives in `StreamableHTTPSessionServerTransport` (inside the task group), and with `session_manager.run()` active, it persists between requests.
+Document the required env vars explicitly and validate them at startup:
+```bash
+# Required env vars for MCP server
+NAUTOBOT_CONFIG=/opt/nautobot/nautobot_config.py
+NAUTOBOT_DB_HOST=nautobot-db        # Must match Nautobot's DB host
+NAUTOBOT_DB_PORT=5432
+NAUTOBOT_DB_NAME=nautobot
+NAUTOBOT_DB_USER=nautobot
+NAUTOBOT_DB_PASSWORD=<from nautobot_config.py>
+```
 
-django-mcp-server takes a more robust approach: it delegates session state to **Django's session framework** (cookie-based, survives restarts). This avoids in-memory session loss if the Django process restarts. For v1, in-memory sessions are acceptable, but this should be documented.
+Validate at startup before calling `nautobot.setup()`:
+```python
+import os
+config_path = os.environ.get("NAUTOBOT_CONFIG", "~/.nautobot/nautobot_config.py")
+if not os.path.exists(os.path.expanduser(config_path)):
+    raise RuntimeError(f"NAUTOBOT_CONFIG not found at {config_path}")
+```
 
 **Warning signs:**
-- `mcp_enable_tools(scope="dcim")` returns `"Enabled: scope 'dcim'"` but immediately `mcp_list_tools` shows no `dcim` tools
-- FastMCP logs show session transport being created fresh each request
+- MCP server starts but returns no data — DB has no schema
+- `relation "dcim_device" does not exist` errors
+- Data returned by MCP doesn't match Nautobot UI data
+- `nautobot-setup` health check passes but DB queries fail
 
-**P0 — Addressed in:** v1.1.0 refactor (session dict now survives across requests)
+**Phase to address:** Phase 0 (Project Setup) — Docker Compose env var wiring
+
+---
+
+### Pitfall 3: `post_migrate` Signal Never Fires (Plugin Tools Not Registered)
+
+**What goes wrong:**
+Third-party Nautobot apps call `register_mcp_tool()` from their `AppConfig.ready()` hooks, but in the standalone process those apps are loaded via `django.setup()` (from `nautobot_config.py`'s `INSTALLED_APPS`) without any `post_migrate` signal firing. Tool registrations are silently missing.
+
+**Why it happens:**
+`nautobot_database_ready` is sent by Nautobot's `nautobot.core.management.commands.post_migrate` signal hook. When the MCP server runs `django.setup()` directly (not via `nautobot-server`), no `migrate` command is run, so `post_migrate` never fires. Additionally, Django's `post_migrate` signal requires the `django migrations` app, not the `nautobot.core.management.commands.post_migrate` subclass.
+
+The reference architecture (ARCHITECTURE.md §5.7) notes this explicitly: "The `post_migrate` signal that fires `nautobot_database_ready` is **not triggered** by standalone `django.setup()`."
+
+**How to avoid:**
+Use a startup discovery mechanism instead of relying on `post_migrate`:
+```python
+# main.py or server.py — called after nautobot.setup() + django.setup()
+def discover_plugin_tools():
+    """Called at startup after nautobot.setup(). Discovers plugin mcp_tools modules."""
+    from django.apps import apps
+    for app_config in apps.get_app_configs():
+        if app_config.name.startswith(("django.", "nautobot.core")):
+            continue
+        try:
+            mcp_module = importlib.import_module(f"{app_config.name}.mcp_tools")
+            # mcp_module.register_tools(mcp) — convention: module exposes register function
+        except ImportError:
+            continue
+```
+
+Or keep the `MCPToolRegistry` as an in-process registry that third-party apps register into via a conventional import-time call, but call `nautobot.setup()` first in the entry point so Django is ready.
+
+**Warning signs:**
+- `mcp_list_tools` returns only core tools, no third-party plugin tools
+- Third-party app's `ready()` hook fires but its tools don't appear
+- `MCPToolRegistry.get_all()` returns fewer tools than expected
+
+**Phase to address:** Phase 2 (Tool Registration Refactor)
+
+---
+
+### Pitfall 4: In-Memory Sessions Lost on Multi-Worker Deployment
+
+**What goes wrong:**
+When running `uvicorn --workers 4`, sessions are stored in each worker's in-memory `StreamableHTTPSessionManager` dict. If a client is routed to worker 1 for request 1, then routed to worker 2 for request 2, the session state from worker 1 is gone. `mcp_enable_tools` on request 1 appears to work, but `mcp_list_tools` on request 2 shows nothing.
+
+**Why it happens:**
+FastMCP's `StreamableHTTPSessionManager` stores sessions in `_server_instances: dict[str, StreamableHTTPServerTransport]`. Each uvicorn worker is a separate Python process with its own memory space. Session dict is not shared across processes.
+
+**How to avoid:**
+For v1 (single-worker acceptable): document `--workers 1` as a hard requirement for session persistence:
+```bash
+# v1: single worker for session persistence
+uvicorn nautobot_app_mcp_server.main:app --host 0.0.0.0 --port 8005 --workers 1
+```
+
+For v2 (multi-worker): implement Redis-backed session storage by subclassing `StreamableHTTPSessionManager` or wrapping the session dict access:
+```python
+# v2 approach — store session state in Redis
+import redis
+_redis = redis.Redis.from_url(os.environ["REDIS_URL"])
+
+async def get_session_state(session_id: str) -> dict:
+    data = _redis.get(f"mcp:session:{session_id}")
+    return json.loads(data) if data else {}
+```
+
+**Warning signs:**
+- Sessions work on first request, fail on second (worker switched)
+- `mcp_enable_tools` result confirmed but next request shows no scope enabled
+- Works with `--workers 1`, broken with `--workers 4`
+
+**Phase to address:** Phase 0 (document as known limitation) + Phase 6 (UAT validation)
+
+---
+
+### Pitfall 5: ORM Calls Without `sync_to_async` Raise `SynchronousOnlyOperation`
+
+**What goes wrong:**
+Async tool handlers call Django ORM directly:
+```python
+@mcp.tool()
+async def device_list(ctx, limit=25):
+    devices = Device.objects.all()  # ← SynchronousOnlyOperation
+```
+The error only surfaces at runtime — not on module import, not in unit tests that mock the ORM.
+
+**Why it happens:**
+Django's `SyncToAsyncWrapper` raises `SynchronousOnlyOperation` when a synchronous ORM call is made from inside an async function that was not explicitly wrapped with `sync_to_async`. FastMCP tool handlers are `async def`. The ORM call is synchronous. The error is raised at the ORM call site.
+
+This pattern is already correctly implemented in the current embedded code (Phase 3 had `PAGE-05` requirement), but when migrating to standalone, the `sync_to_async` wrapper pattern must be maintained and not accidentally removed during refactoring.
+
+**How to avoid:**
+Every ORM call inside an async tool handler must be wrapped:
+```python
+@mcp.tool()
+async def device_list(ctx, limit=25):
+    @sync_to_async
+    def _query():
+        return list(Device.objects.select_related("status").all()[:limit])
+    devices = await _query()
+    return [serialize(d) for d in devices]
+```
+
+Enforce via code review checklist item: "Every ORM call in `tools/` is inside a `@sync_to_async`-wrapped inner function."
+
+**Warning signs:**
+- `SynchronousOnlyOperation: You cannot call this from an async context` at runtime
+- Only surfaces with real ORM (unit tests mock it away)
+- Most likely to appear in `search_by_name` which does multi-model queries
+
+**Phase to address:** Phase 2 (Tool Registration Refactor) — re-verify all tool implementations
+
+---
+
+### Pitfall 6: `contextvars.ContextVar` and `_mcp_tool_state` Monkey-Patching Broken in Standalone
+
+**What goes wrong:**
+The embedded code uses `ctx.request_context._mcp_tool_state` (monkey-patching the RequestContext dataclass) and `_cached_user` on the same dataclass. In the standalone process, FastMCP runs in its own event loop without the Django `RequestContext` wrapper that the embedded bridge was creating. These patterns may not work the same way.
+
+**Why it happens:**
+In the embedded architecture, `view.py` builds a custom `RequestContext` object and passes it through the ASGI call chain. The standalone FastMCP process uses its own `Server.request_context` (`contextvars.ContextVar`) which holds FastMCP's internal `RequestContext` dataclass — a different type, from `mcp.server.lowlevel`.
+
+Specifically:
+- `ctx.request_context._mcp_tool_state` — assumes the `request_context` is the embedded bridge's custom type
+- `ctx.request_context._cached_user` — same assumption
+
+In standalone FastMCP, `ctx.request_context` is `mcp.server.lowlevel.RequestContext` (different shape).
+
+**How to avoid:**
+Replace monkey-patched dataclass attributes with session dict access (which IS cross-version compatible):
+```python
+# Old (embedded): monkey-patch RequestContext dataclass
+ctx.request_context._cached_user = user
+cached = ctx.request_context._cached_user
+
+# New (standalone): use FastMCP session dict (always available, always dict-like)
+ctx.request_context.session["cached_user"] = user
+cached = ctx.request_context.session.get("cached_user")
+```
+
+For progressive disclosure, the session dict approach (already in `session_tools.py` `MCPSessionState.from_session()`) is already correct. The fix is to remove the `_get_tool_state()` monkey-patch helper entirely and access the session dict directly.
+
+**Warning signs:**
+- `AttributeError: 'RequestContext' object has no attribute '_mcp_tool_state'`
+- `AttributeError: 'RequestContext' object has no attribute '_cached_user'`
+- Progressive disclosure tools return wrong tool list
+
+**Phase to address:** Phase 3 (Session State Simplification) — replace monkey-patching with session dict
+
+---
+
+### Pitfall 7: Auth Token Read from Wrong Place (MCP vs Django Request)
+
+**What goes wrong:**
+Auth extracts the token from `ctx.request_context.request.headers` — which in the embedded bridge came from the MCP HTTP request, but in standalone FastMCP, `request_context.request` is set by FastMCP's own HTTP handler. These should be the same thing, but if any middleware or proxy modifies headers before FastMCP sees them, the token may be lost or overwritten.
+
+**Why it happens:**
+In the embedded architecture, the Django view bridges the HTTP request into ASGI, building headers from `django_request.headers`. In standalone, FastMCP receives the HTTP request directly from uvicorn. The token is in the `Authorization` header. The risk is:
+1. Reverse proxy (nginx) strips or modifies the `Authorization` header
+2. Token is read from FastMCP's request object but the wrong header key is used (case sensitivity)
+3. Token is forwarded but the format changes (e.g., nginx `auth_request` strips headers)
+
+**How to avoid:**
+Verify the auth header reaches FastMCP in deployment:
+```python
+# Debug endpoint during development
+@mcp.tool()
+async def debug_auth_headers(ctx) -> dict:
+    """DEBUG ONLY — list all request headers."""
+    return dict(ctx.request_context.request.headers)
+```
+
+In production (nginx), ensure `Authorization` header is explicitly forwarded:
+```nginx
+location /mcp/ {
+    proxy_pass http://127.0.0.1:8005;
+    proxy_set_header Authorization $http_authorization;  # must be explicit
+    proxy_pass_header Authorization;  # if backend expects it
+}
+```
+
+**Warning signs:**
+- Auth works in dev (direct connection), fails in production (behind nginx)
+- Token visible in MCP client logs but auth fails server-side
+- `Authorization` header missing from FastMCP's `request.headers` dict
+
+**Phase to address:** Phase 4 (Auth Refactor) — verify token extraction in deployment config
+
+---
+
+### Pitfall 8: MCPToolRegistry Accessed Before `nautobot.setup()` in Standalone Process
+
+**What goes wrong:**
+Third-party code or tests import from `nautobot_app_mcp_server` and try to access `MCPToolRegistry.get_instance()` or `register_mcp_tool()` before `nautobot.setup()` has run. If `MCPToolRegistry` or the tools module imports any Django model at module level, this raises `RuntimeError: Django wasn't set up yet`.
+
+**Why it happens:**
+The embedded architecture's `MCPToolRegistry` is Django-model-agnostic (only stores function references). But `register_mcp_tool()` calls in `tools/__init__.py` import tool implementations that may transitively import Django models.
+
+```python
+# tools/core.py
+from nautobot.dcim.models import Device  # ← if this import runs at module level
+                                       #    before nautobot.setup(), it fails
+```
+
+**How to avoid:**
+Keep all model imports **inside** tool functions (lazy) or **inside** `@sync_to_async`-wrapped inner functions. The `MCPToolRegistry` itself has no Django dependencies — only the tool implementations do.
+
+```python
+# CORRECT: model imported inside the async tool handler
+async def device_list(ctx, limit=25):
+    from nautobot.dcim.models import Device  # ← lazy import, safe
+    @sync_to_async
+    def _query():
+        return list(Device.objects.all()[:limit])
+    return await _query()
+```
+
+Add a startup validation test that imports the entire tools package before `nautobot.setup()` and asserts it succeeds (it should, if lazy imports are used).
+
+**Warning signs:**
+- `RuntimeError: Django wasn't set up yet` when importing `nautobot_app_mcp_server.tools`
+- Works after `nautobot.setup()`, fails before
+- Third-party `register_mcp_tool()` calls fail at import time
+
+**Phase to address:** Phase 2 (Tool Registration Refactor) — lazy import audit
+
+---
+
+### Pitfall 9: MCP Endpoint URL Changes — Clients Break
+
+**What goes wrong:**
+Claude Desktop or other MCP clients are configured to connect to `http://nautobot:8080/plugins/nautobot-app-mcp-server/mcp/`. After migration to standalone, the endpoint moves to `http://mcp-server:8005/mcp/`. All client configs are now wrong.
+
+**Why it happens:**
+The embedded MCP server was at Nautobot's plugin URL. The standalone MCP server runs on its own port. The URL change is a breaking change for all MCP clients.
+
+**How to avoid:**
+Provide a clear migration path with a deprecation period:
+1. Keep the embedded endpoint functional at the old URL during a transition window
+2. Update `SKILL.md` and documentation to reflect the new URL
+3. Provide a CLI flag `--legacy-embedded-mode` that preserves the old URL during transition
+4. Document the new URL prominently in `docs/admin/upgrade.md`
+
+```python
+# upgrade path in nautobot-server management command
+# Keep old endpoint alive for deprecation period:
+# 1.x: Both embedded (old) and standalone (new) available
+# 2.0: Standalone only, embedded removed
+```
+
+**Warning signs:**
+- MCP clients return "connection refused" or "invalid endpoint" after upgrade
+- `SKILL.md` references old URL
+- Documentation still points to `/plugins/nautobot-app-mcp-server/mcp/`
+
+**Phase to address:** Phase 6 (UAT & Validation) — full client reconfiguration validation
+
+---
+
+### Pitfall 10: `NautobotAppConfig` Still Required for Plugin Discovery
+
+**What goes wrong:**
+If the app is migrated to standalone but still has a `NautobotAppConfig` in `__init__.py`, and is listed in `PLUGINS`, Nautobot may try to auto-discover and load it as a plugin. This could cause duplicate initialization or conflicts between the app plugin loading and the standalone server.
+
+**Why it happens:**
+Nautobot's plugin system loads any app in `PLUGINS` by importing its `__init__.py` and calling `setup()` on the `NautobotAppConfig`. If the standalone MCP server is also running (started separately), both the plugin loader and the standalone process try to initialize the same components.
+
+**How to avoid:**
+If keeping the standalone as a Nautobot app (for settings management and config inheritance):
+```python
+# __init__.py — guard to prevent double-init
+class NautobotAppMcpServerConfig(NautobotAppConfig):
+    name = "nautobot_app_mcp_server"
+
+    def ready(self):
+        # Only register if NOT running as standalone MCP server
+        if os.environ.get("NAUTOBOT_MCP_STANDALONE") != "1":
+            from .mcp import register_core_tools
+            register_core_tools()  # No-op if already registered by standalone
+```
+
+Alternatively, remove from `PLUGINS` entirely and manage config via env vars or `nautobot_config.py`'s `PLUGINS_CONFIG`.
+
+**Warning signs:**
+- Duplicate tool registrations (same tool registered twice)
+- `ValueError: Tool already registered` on startup
+- Plugin appears twice in Nautobot admin UI
+
+**Phase to address:** Phase 0 (Project Setup) — decide app vs standalone-only packaging
+
+---
+
+### Pitfall 11: Database Connection to Wrong Instance (Split-Brain)
+
+**What goes wrong:**
+The MCP server's `nautobot_config.py` points to `NAUTOBOT_DB_HOST=localhost` (the default), while Nautobot itself connects to `nautobot-db` (Docker service name). The MCP server reads from a local SQLite or wrong Postgres, while Nautobot writes to the real DB. Data is stale or missing.
+
+**Why it happens:**
+`nautobot.setup()` reads DB connection params from `NAUTOBOT_DB_*` env vars. If the MCP server's env doesn't include these (the Docker container doesn't inherit Nautobot's env), it falls back to Django defaults.
+
+**How to avoid:**
+Explicitly pass all DB connection env vars to the MCP server container:
+```yaml
+# docker-compose.yml
+services:
+  nautobot-mcp:
+    environment:
+      NAUTOBOT_CONFIG: /config/nautobot_config.py
+      NAUTOBOT_DB_HOST: nautobot-db        # Must match Nautobot's DB host
+      NAUTOBOT_DB_PORT: 5432
+      NAUTOBOT_DB_NAME: ${NAUTOBOT_DB_NAME}
+      NAUTOBOT_DB_USER: ${NAUTOBOT_DB_USER}
+      NAUTOBOT_DB_PASSWORD: ${NAUTOBOT_DB_PASSWORD}
+    volumes:
+      - ./nautobot_config.py:/config/nautobot_config.py:ro
+    depends_on:
+      - nautobot-db
+```
+
+Also validate at startup by querying a known Nautobot-only table:
+```python
+nautobot.setup()
+from django.db import connection
+with connection.cursor() as c:
+    c.execute("SELECT 1 FROM extras_jobresult LIMIT 1")  # nautobot-specific table
+```
+
+**Warning signs:**
+- MCP returns empty querysets for data known to exist in Nautobot
+- `device_list` returns 0 devices on MCP but 5 in Nautobot UI
+- MCP server has no `extras_jobresult` table
+
+**Phase to address:** Phase 0 (Project Setup) — Docker Compose env var wiring
+
+---
+
+### Pitfall 12: `view.py` and `urls.py` Not Removed — Old Endpoint Still Accessible
+
+**What goes wrong:**
+After migrating to standalone, `view.py` and `urls.py` are left in the codebase. If the app is still in `PLUGINS`, the old embedded endpoint is still mounted at `/plugins/nautobot-app-mcp-server/mcp/`. Users hit the old endpoint and get the broken embedded behavior while the documentation says to use the new standalone port.
+
+**Why it happens:**
+The Phase 5 "Bridge Cleanup" task is deferred or forgotten. `view.py` and `urls.py` are still committed. The `NautobotAppConfig` still has `name = "nautobot_app_mcp_server"` and `urls.py` is auto-discovered by Nautobot's plugin URL routing.
+
+**How to avoid:**
+Include `view.py` and `urls.py` removal as an explicit Phase 5 task with a checklist:
+- [ ] Delete `nautobot_app_mcp_server/urls.py`
+- [ ] Remove `urls` from `NautobotAppConfig` in `__init__.py`
+- [ ] Remove `@csrf_exempt` and `mcp_view` from `__init__.py` exports
+- [ ] Verify old endpoint returns 404 after cleanup
+- [ ] Document new standalone endpoint in upgrade notes
+
+**Warning signs:**
+- Old endpoint still responds with MCP JSON-RPC after migration
+- Two endpoints both serve MCP (old broken + new standalone)
+- `urls.py` still has `path("mcp/", mcp_view)` after Phase 5
+
+**Phase to address:** Phase 5 (Bridge Cleanup) — explicit deletion checklist
 
 ---
 
@@ -300,44 +458,43 @@ django-mcp-server takes a more robust approach: it delegates session state to **
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| `asyncio.run()` in view | Simple, no external deps | Destroys all session state per request | Never — hard requirement to fix |
-| In-memory session storage | No Redis needed | Sessions lost on restart or multi-worker | Only for single-worker dev; document |
-| Hardcoded ASGI `server` tuple | Works in dev | Breaks behind reverse proxies or custom ports | Always fix — 2-line change |
-| No request-level user cache | Simple code | N token DB queries per batch MCP request | Only for very low traffic; fix with `functools.lru_cache` on thread-local key |
-| Mock ToolContext in `_list_tools_mcp` | Tests pass without real session | Test coverage gap for session logic | Only as supplement to integration tests |
-| Single `StreamableHTTPSessionManager` reused across requests | Simple architecture | All sessions in one manager — if it crashes, all die | Acceptable for single-process; document |
+| `--workers 1` | Sessions work out of the box | No horizontal scaling, single point of failure | v1 only; must document as limitation |
+| In-memory session storage | No Redis dependency | Sessions lost on restart or worker switch | Single-worker dev; document clearly |
+| Lazy model imports | App loads without Django setup | Harder to catch import errors early | Always — never import Django models at module level |
+| Skip Docker health check | Faster startup | Silent failures, hard to debug | Never — add `livenessProbe` for MCP server |
+| Keep old `view.py` during transition | Backward compat | Users hit wrong endpoint | Only during explicit deprecation window, documented |
+| Single DB connection (no pooling config) | Simple config | Connection exhaustion under load | Only for low-traffic dev; use `CONN_MAX_AGE` in prod |
 
 ---
 
 ## Integration Gotchas
 
-### Integration: Django ORM ↔ FastMCP Async Handlers
+### Integration: uvicorn ↔ FastMCP
 
 | Common Mistake | Correct Approach |
-|---------------|-----------------|
-| Calling Django ORM directly from async tool handler without `sync_to_async` | Wrap ORM calls: `sync_to_async(get_user, thread_sensitive=True)(token_key)` |
-| `sync_to_async` without `thread_sensitive=True` | Use `thread_sensitive=True` to reuse Django's thread-local connection pool |
-| `async_to_sync` wrapping a sync Django ORM call inside an already-async handler | Never nest `async_to_sync` inside `sync_to_async` — use `await` all the way through |
-| Calling ORM in FastMCP lifespan/startup hooks | ORM must only be called after Django `ready()` signal fires; use lazy init for server |
-| QuerySet iteration in async context without wrapping | Wrap in `sync_to_async(list, thread_sensitive=True)(queryset)` |
+|----------------|------------------|
+| Not specifying `--workers 1` | Sessions live in each process; workers > 1 = session loss between requests |
+| Missing `--host 127.0.0.1` (exposes publicly) | Bind to localhost for proxy-only access; `--host 0.0.0.0` only with firewall |
+| Not configuring `proxy_fix` middleware | `X-Forwarded-*` headers ignored; `request.is_secure()` wrong behind nginx |
+| Not setting `BACKWARD_COMPAT_MODE` env | Old clients break without a clear error message |
 
-### Integration: FastMCP Session Dict ↔ Django Session Framework
-
-| Common Mistake | Correct Approach |
-|---------------|-----------------|
-| Storing session state only in FastMCP in-memory dict (lost on restart) | For persistence: mirror to Django sessions; for v1: document in-memory limitation |
-| Relying on `Mcp-Session-Id` matching Django session key | They are independent — FastMCP generates its own UUID session IDs |
-| Calling `session.save()` after writing FastMCP session state | Only needed if delegating to Django sessions; FastMCP manages its own dict |
-| Session state read/write race in concurrent tool calls | FastMCP's `ServerSession` dict operations are synchronous within the async task; no extra locking needed |
-
-### Integration: `Server.request_context` ↔ Django Request Lifecycle
+### Integration: Nautobot ↔ Standalone MCP Server
 
 | Common Mistake | Correct Approach |
-|---------------|-----------------|
-| Accessing `Server.request_context` outside `session_manager.run()` task group | Always access inside active lifespan; raise `LookupError` gracefully outside |
-| Accessing `Server.request_context` in FastMCP tool handler before handler is called | Context is set in `_handle_request()` before handler dispatch — available during tool execution |
-| Overriding `_list_tools_mcp` and accessing `Server.request_context` | Safe if called from within `session_manager.run()`; catches `LookupError` for test/fallback paths |
-| Passing Django `HttpRequest` through `Server.request_context` | Use `context.request_context.request` (MCP SDK request) — not Django `HttpRequest` |
+|----------------|------------------|
+| Different `NAUTOBOT_CONFIG` files | Both must use the same `nautobot_config.py` — shared volume in Docker |
+| MCP server starts before Nautobot DB is ready | Add `depends_on: nautobot-db` with healthcheck in docker-compose |
+| `nautobot.setup()` called twice (import + direct) | It's idempotent but confirms mis-structured startup |
+| Token auth uses wrong token format (with `nbapikey_` prefix) | Nautobot tokens are 40-char hex with no prefix; strip prefix in auth |
+| MCP server uses stale token DB | Tokens are in shared DB — no special handling needed |
+
+### Integration: Third-Party Plugins ↔ Standalone MCP Registry
+
+| Common Mistake | Correct Approach |
+|----------------|------------------|
+| Plugins call `register_mcp_tool()` from `ready()` — but `nautobot.setup()` not called yet | Entry point calls `nautobot.setup()` first; plugin `ready()` hooks fire during `django.setup()` which happens inside `nautobot.setup()` |
+| Plugin's `mcp_tools` module imports models at top level | Convention: `mcp_tools` modules must use lazy imports; audit with import test |
+| Tool registration in `post_migrate` never fires | Replace with startup discovery in `main.py` after `django.setup()` completes |
 
 ---
 
@@ -345,10 +502,11 @@ django-mcp-server takes a more robust approach: it delegates session state to **
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Token lookup without caching | N DB queries per MCP request (one per tool call in batch) | `functools.lru_cache` on token key OR thread-local cache set at request entry | Batch operations with 5+ tool calls |
-| `MCPToolRegistry.fuzzy_search()` O(n) per term | Linear scan of all tools per fuzzy term | O(n) is fine for <100 tools; add inverted index if registry grows | 500+ tools with 10+ fuzzy terms |
-| Session dict rebuilt from scratch per `mcp_list_tools` call | Repeated `MCPSessionState.from_session()` deserialization | Session dict operations are dict reads — negligible overhead | Not a concern at expected scale |
-| `_list_tools_mcp` override fetches all tools then filters | Two full tool scans (registry + filter) | Acceptable at <100 tools; defer optimization until measured | 1000+ tools with complex filtering |
+| `CONN_MAX_AGE` not set | New DB connection per request | Set `CONN_MAX_AGE=300` in `nautobot_config.py` | ~50+ concurrent MCP requests |
+| `select_related` missing on list tools | N+1 queries per page | Require `select_related` chain in code review for every list tool | list tools with >10 results |
+| No pagination limit cap | Client requests `limit=1000000` | Enforce `LIMIT_MAX=1000` in `paginate_queryset` | Large limit crashes or timeouts |
+| Session dict deserialization per tool call | CPU overhead at scale | Session dict ops are O(1) dict access — not a concern at expected scale | >10k tools with complex session state |
+| No connection pool sizing for multi-worker | DB connection exhaustion | uvicorn `--workers 4` + PostgreSQL `max_connections` ≥ `(workers × pool_size) + nautobot_connections` | 4+ workers, high concurrency |
 
 ---
 
@@ -356,25 +514,40 @@ django-mcp-server takes a more robust approach: it delegates session state to **
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| Anonymous user returning data silently | Data leakage if auth misconfigured | Log warning when `AnonymousUser` used; fail-closed for sensitive scopes |
-| Auth token logged in plaintext | Token exposure in logs | Never log `Authorization` header value; log only prefix (`Token abc...`) |
-| Token lookup without rate limiting | Token enumeration via repeated requests | Nautobot's Token model is already DB-backed; add Django throttle class if needed |
-| `MCPSessionState` mutable by client | Malicious client manipulates session | Session state only controls tool visibility (read operations); write tools are out of scope for v1 |
-| No CORS control on MCP endpoint | Unauthorized cross-origin calls | MCP endpoint is behind Nautobot's auth; add explicit origin allowlist if exposed externally |
+| MCP server exposed publicly (no auth) | Unauthenticated access to all Nautobot data | Always require `Authorization: Token <key>` header; reject at FastMCP layer if missing |
+| Token key logged in plaintext | Token exposure in server logs | Never log `auth_header[6:]`; log only `Token abc...12` (last 2 chars) |
+| `Authorization` header forwarded by nginx without `InternalRedirect` | Token visible in access logs | Use `proxy_set_header` not `proxy_pass_header` for `Authorization` |
+| MCP server can be reached without TLS in production | Token interception via network eavesdropping | Put behind HTTPS-terminating reverse proxy; uvicorn listens on localhost only |
+| No rate limiting on MCP endpoint | Token enumeration via brute force | Nautobot Token lookup is DB-backed; add uvicorn `--limit-concurrency` for DDoS protection |
+| `nautobot_config.py` world-readable in container | DB credentials exposed | `0600` permissions on config file; use Docker secrets for production |
+
+---
+
+## UX Pitfalls
+
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| Old endpoint documented in SKILL.md | Claude Desktop connects to wrong URL and fails silently | Update SKILL.md endpoint URL as part of Phase 5 cleanup; version the SKILL.md package |
+| No error message when token is expired | Agent retries forever with no explanation | Check `token.is_expired` in auth and return explicit error dict, not silent `AnonymousUser` |
+| Progressive disclosure not explained | New users don't know how to enable DCIM/IPAM tools | SKILL.md must document `mcp_enable_tools(scope="dcim")` with clear examples |
+| Session state not visible to user | User enables tools but can't verify it worked | `mcp_list_tools` should return structured output (not just text) so agent can parse |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **`asyncio.run()` replaced:** `async_to_sync` is used, but verify `session_manager.run()` is called once at startup (not per-request)
-- [ ] **`Server.request_context` works:** `LookupError` no longer fires in production; integration test verifies session dict survives across two sequential MCP requests
-- [ ] **Session state persists:** `mcp_enable_tools(scope="dcim")` followed by `mcp_list_tools` shows `dcim` tools — verified by integration test
-- [ ] **`StreamableHTTPSessionManager.run()` entered once:** Check that `session_manager.run()` is inside a lifespan context manager (Django startup or Starlette app lifespan), not inside per-request code
-- [ ] **Thread-safe singleton:** `get_mcp_app()` uses double-checked locking; two concurrent startup requests don't create duplicate instances
-- [ ] **ASGI scope server address:** `request.get_host()` / `request.get_port()` used, not hardcoded `("127.0.0.1", 8080)`
-- [ ] **User token cached per request:** Auth layer caches token→user lookup using thread-local or request-level cache, not per-tool
-- [ ] **Django ORM sync calls wrapped:** All ORM calls in tool handlers go through `sync_to_async(..., thread_sensitive=True)`
-- [ ] **Session dict survives process restart:** If persistence is required: delegate to Django sessions; if not: document as known limitation
+- [ ] **`nautobot.setup()` placed at entry point:** Verified at first line of `main.py`, before any model imports
+- [ ] **All model imports are lazy:** `from nautobot.dcim.models import Device` is inside tool handlers, not at module level — audit `tools/core.py`
+- [ ] **`--workers 1` enforced in deployment:** `docker-compose.yml` and systemd unit file both specify single worker
+- [ ] **DB connection validated at startup:** Startup script queries a Nautobot-specific table (e.g., `extras_jobresult`) and exits non-zero on failure
+- [ ] **`NAUTOBOT_DB_*` env vars documented:** All required env vars listed in `docs/admin/install.md` with example values
+- [ ] **`nautobot_config.py` shared with Nautobot:** Docker volume mount verified in `docker-compose.yml`
+- [ ] **`view.py` and `urls.py` deleted:** Old endpoint no longer accessible; verified by `GET /plugins/nautobot-app-mcp-server/mcp/` → 404
+- [ ] **SKILL.md endpoint updated:** References `http://localhost:8005/mcp/` (or production equivalent), not the old plugin URL
+- [ ] **`MCPToolRegistry` accessible to third-party plugins:** `register_mcp_tool()` works from `AppConfig.ready()` hooks; tested with a dummy plugin
+- [ ] **Auth token format correct:** 40-char hex key, no `nbapikey_` prefix, verified against live Nautobot Token model
+- [ ] **Session state survives across requests:** UAT test with two sequential requests verifies progressive disclosure works end-to-end
+- [ ] **`sync_to_async` used on all ORM calls:** Code review checklist item passed; no `SynchronousOnlyOperation` in logs
 
 ---
 
@@ -382,42 +555,52 @@ django-mcp-server takes a more robust approach: it delegates session state to **
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| `asyncio.run()` session destruction | LOW | Replace with `async_to_sync` + lifespan-managed session manager; no data migration needed |
-| `Server.request_context` LookupError | LOW | Fixes automatically once `asyncio.run()` is fixed; add defensive `LookupError` catch for test compatibility |
-| Session manager `.run()` re-entry | LOW | Create `StreamableHTTPSessionManager` once as module-level singleton; never recreate per request |
-| Thread-unsafe singleton | LOW | Add `threading.Lock` around `_mcp_app` creation; no other changes needed |
-| In-memory sessions lost on restart | MEDIUM | Implement Django session delegation (django-mcp-server pattern); requires session schema migration if sharing with Django sessions |
-| Auth token lookup uncached | LOW | Add `functools.lru_cache(maxsize=128)` on token→user lookup function keyed by token key |
+| P1: `nautobot.setup()` called after model imports | LOW | Move `nautobot.setup()` to entry point; convert top-level model imports to lazy imports |
+| P2: Wrong DB config | MEDIUM | Update env vars or `nautobot_config.py`; restart container; verify with data smoke test |
+| P3: `post_migrate` never fires | MEDIUM | Implement startup plugin discovery in `main.py`; add integration test for third-party tool registration |
+| P4: Sessions lost on multi-worker | HIGH | Switch to `--workers 1` (immediate fix); implement Redis sessions for v2 |
+| P5: ORM without `sync_to_async` | LOW | Wrap all ORM calls in `@sync_to_async(thread_sensitive=True)` inner functions |
+| P6: Monkey-patched dataclass attrs | LOW | Replace `._mcp_tool_state` and `._cached_user` with session dict access |
+| P7: Auth token stripped by proxy | MEDIUM | Update nginx config with explicit `proxy_set_header Authorization`; test with debug tool |
+| P8: Registry accessed before setup | LOW | Audit `tools/` package for top-level model imports; fix to lazy imports |
+| P9: Old endpoint still accessible | LOW | Delete `view.py` + `urls.py`; update SKILL.md; restart container |
+| P10: Duplicate plugin init | LOW | Remove from `PLUGINS` or add env var guard in `ready()` |
+| P11: Split-brain DB | MEDIUM | Update Docker env vars to point to correct DB; run data smoke test |
+| P12: Old bridge files left in place | LOW | Delete `view.py`, `urls.py`; verify 404 on old endpoint |
 
 ---
 
 ## Pitfall-to-Phase Mapping
 
-| Pitfall | Milestone | Verification |
-|---------|-----------|---------------|
-| P1: `asyncio.run()` destroys session state | v1.1.0 — P0 fix | Integration test: two sequential MCP requests with `Mcp-Session-Id`; second request recognizes session |
-| P2: `Server.request_context` LookupError | v1.1.0 — P0 fix | Unit test mocks session dict; integration test verifies real context access |
-| P3: `session_manager.run()` per-request | v1.1.0 — P0 fix | Verify "StreamableHTTP session manager started" appears once in logs at startup |
-| P4: Lifespan not wired | v1.1.0 — P0 fix | No `RuntimeError: Task group is not initialized` in logs under load |
-| P5: Thread-unsafe singleton | v1.1.0 — P1 fix | Concurrent startup under load test; no duplicate `_setup_mcp_app()` calls |
-| P6: Session state never survives | v1.1.0 — P0 fix | Covered by P1 verification |
-| P1: Auth token lookup uncached | v1.1.0 — P1 fix | Django debug toolbar or query count assertion: N queries for N tool calls → 1 query |
-| P1: ASGI scope server hardcoded | v1.1.0 — P1 fix | Verify `request.get_host()` value appears in ASGI scope |
+| Pitfall | Prevention Phase | Verification |
+|---------|-------------------|--------------|
+| P1: `nautobot.setup()` ordering | Phase 0 | `python -c "from nautobot_app_mcp_server.tools import *"` succeeds before setup |
+| P2: `NAUTOBOT_CONFIG` misconfigured | Phase 0 | Container starts, DB query succeeds, `extras_jobresult` table accessible |
+| P3: `post_migrate` not firing | Phase 2 | Integration test: fake plugin calls `register_mcp_tool()` from `ready()` → tool appears |
+| P4: Multi-worker session loss | Phase 0 | Document `--workers 1` requirement; UAT with `uvicorn --workers 4` shows failure |
+| P5: ORM without `sync_to_async` | Phase 2 | `grep -r "Device.objects" nautobot_app_mcp_server/mcp/tools/` returns only inside `@sync_to_async` blocks |
+| P6: Monkey-patching broken | Phase 3 | Progressive disclosure integration test passes with real `ctx.request_context.session` |
+| P7: Auth header stripped | Phase 4 | Dev proxy test: `curl -H "Authorization: Token $KEY"` arrives at FastMCP |
+| P8: Registry accessed early | Phase 2 | Startup validation test: import all tools modules before `nautobot.setup()` |
+| P9: Old endpoint breaks clients | Phase 6 | Old URL returns 404; new URL works; SKILL.md updated |
+| P10: Plugin double-init | Phase 0 | App not in `PLUGINS`; OR env var guard present; no duplicate registrations |
+| P11: Split-brain DB | Phase 0 | Docker health check + startup DB query validation |
+| P12: Old bridge files remain | Phase 5 | `view.py` deleted; `urls.py` deleted; `__init__.py` exports checked |
 
 ---
 
 ## Sources
 
-- [django-mcp-server djangomcp.py](https://raw.githubusercontent.com/gts360/django-mcp-server/main/mcp_server/djangomcp.py) — `async_to_sync` WSGI→ASGI bridge, `StreamableHTTPSessionManager` lifespan wiring, Django session delegation
-- [django-mcp-server views.py](https://raw.githubusercontent.com/gts360/django-mcp-server/main/mcp_server/views.py) — `MCPServerStreamableHttpView` DRF APIView pattern
-- [mcp/server/lowlevel/server.py](file://.venv/lib/python3.12/site-packages/mcp/server/lowlevel/server.py) — `Server.request_context` contextvar, `_handle_request()` context setup (lines 746–779)
-- [mcp/server/streamable_http_manager.py](file://.venv/lib/python3.12/site-packages/mcp/server/streamable_http_manager.py) — `StreamableHTTPSessionManager.run()` once-per-instance guard, stateful vs stateless request handling, session dict per `Mcp-Session-Id`
-- [fastmcp/server/http.py](file://.venv/lib/python3.12/site-packages/fastmcp/server/http.py) — `StreamableHTTPASGIApp`, `RequestContextMiddleware`, `create_streamable_http_app` lifespan wiring (lines 365–368), `RuntimeError: Task group is not initialized` helpful message
-- [fastmcp/server/mixins/transport.py](file://.venv/lib/python3.12/site-packages/fastmcp/server/mixins/transport.py) — `http_app()` and `run_http_async()` entry points
-- `docs/dev/mcp-implementation-analysis.md` — current implementation analysis, bug inventory, P0/P1 priority ranking
-- `nautobot_app_mcp_server/mcp/view.py` — current broken implementation (P0: `asyncio.run()`)
-- `nautobot_app_mcp_server/mcp/server.py` — current broken implementation (P0: `Server.request_context.get()` → LookupError, P1: thread-unsafe singleton)
+- `docs/dev/ARCHITECTURE.md` — standalone verification, `nautobot.setup()` analysis, Docker deployment design
+- `docs/dev/mcp-implementation-analysis.md` — session persistence patterns, FastMCP `StreamableHTTPSessionManager` internals
+- `ROADMAP.md` — Phase 0–6 scope, migration requirements, tool registration API design
+- `STATE.md` — current embedded architecture state (8 concurrency primitives, monkey-patching patterns to remove)
+- `nautobot_app_mcp_server/mcp/server.py` — current `_list_tools_mcp` override pattern to replace
+- `nautobot_app_mcp_server/mcp/session_tools.py` — current monkey-patched `_mcp_tool_state` pattern to replace with session dict
+- `nautobot_app_mcp_server/mcp/auth.py` — current `._cached_user` monkey-patch to replace with session dict
+- `nautobot_app_mcp_server/mcp/view.py` — current bridge to delete in Phase 5
+- `docs/dev/import_and_uat.md` — UAT patterns applicable to new architecture
 
 ---
-*Pitfalls research for: Django WSGI → FastMCP ASGI bridge*
-*Researched: 2026-04-03*
+*Pitfalls research for: Nautobot App + FastMCP separate-process architecture migration*
+*Researched: 2026-04-05*

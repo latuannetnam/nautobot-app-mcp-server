@@ -1,8 +1,8 @@
-# Stack Research: WSGI→ASGI Bridge for FastMCP in Django
+# Stack Research: Separate-Process FastMCP Server Architecture
 
-**Domain:** Django WSGI App embedding a FastMCP ASGI server
-**Researched:** 2026-04-03
-**Confidence:** HIGH — Source-verified from django-mcp-server v0.5.6 and `mcp` SDK `streamable_http_manager.py`
+**Domain:** Separate-process MCP server (Option B) — FastMCP as a standalone Python process, bootstrapped via Django management commands
+**Researched:** 2026-04-05
+**Confidence:** HIGH — Source-verified from `nautobot-app-mcp` reference project (two management commands, `create_app()` factory, `nautobot.setup()`)
 
 ---
 
@@ -12,482 +12,271 @@
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| `asgiref` | (ships with Django / FastMCP) | `async_to_sync` WSGI→ASGI bridge | Single canonical tool; used by Django Channels, Starlette; keeps event loop alive across requests |
-| `mcp` | `>=1.8.0` (ships via fastmcp) | `StreamableHTTPSessionManager`, `MCPServer` core | Already installed via `fastmcp`; exposes the session manager used in django-mcp-server |
-| `fastmcp` | `^3.2.0` (already installed) | `FastMCP` server, `http_app()` ASGI factory | Already used; provides `http_app()` that returns a Starlette ASGI app |
-| `starlette` | (ships with fastmcp) | `Headers`, `Scope` types | Already a transitive dep; used by django-mcp-server for ASGI scope typing |
-| `contextvars` | stdlib | Thread-local request context in `_call_starlette_handler` | Keeps Django request accessible in async tool calls without coupling to MCP internals |
+| `fastmcp` | `^3.2.0` (existing) | `FastMCP` server instance, `mcp.run(transport="sse")` | Already installed; provides the standalone runloop — no Django bridge needed |
+| `uvicorn` | `>=0.35.0` (transitive via fastmcp; locked `0.42.0`) | ASGI server for dev hot-reload | FastMCP already depends on uvicorn; `start_mcp_dev_server.py` uses `uvicorn.run()` with `reload=True` and `create_app()` factory |
+| `nautobot` | `>=3.0.0,<4.0.0` (existing) | `nautobot.setup()` bootstraps Django ORM once per worker | Called once at worker startup; from then on, direct ORM access works without the WSGI→ASGI bridge |
+| `asgiref` | ships with Nautobot/FastMCP (existing) | `sync_to_async` wraps ORM calls in async tool handlers | Existing in embedded architecture; continues to be used for ORM calls inside `async def tool_handler()` |
 
 ### Supporting Libraries
 
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| `django` | `>=3.0` (already installed) | Django `HttpRequest`, session backend | Always — Django is the host |
-| `anyio` | (ships with FastMCP) | `anyio.Lock`, `anyio.create_task_group` | Only if re-implementing session manager internals |
+| `django.core.management` | (ships with Nautobot) | `BaseCommand` for `start_mcp_server.py` and `start_mcp_dev_server.py` | Always — management commands are the process entry point |
+| `signal` | stdlib | `SIGUSR1` force-reload handler in dev server | Only in dev server; handles uvicorn restart signals |
+
+---
+
+## What Is ADDED vs REMOVED vs KEPT
+
+### ADDED (New Dependencies / Patterns for Separate-Process)
+
+| Addition | Rationale | Source |
+|----------|-----------|--------|
+| `uvicorn` (`>=0.35`) explicitly listed | Required for `start_mcp_dev_server.py`; already a transitive dep via FastMCP but should be explicit for `uvicorn.run()` API | `nautobot-app-mcp` `start_mcp_dev_server.py` L79 |
+| `start_mcp_server.py` Django management command | Production entry point: `mcp.run(transport="sse")` on a configurable host/port | `nautobot-app-mcp` `start_mcp_server.py` L71 |
+| `start_mcp_dev_server.py` Django management command | Dev entry point: `uvicorn.run("...:create_app", reload=True)` with auto-reload watching tool dirs | `nautobot-app-mcp` `start_mcp_dev_server.py` L79 |
+| `create_app()` factory function | Standalone FastMCP app factory callable by uvicorn; calls `nautobot.setup()` + registers tools | `nautobot-app-mcp` `start_mcp_dev_server.py` L91 |
+| `nautobot.setup()` call at worker startup | Bootstraps Django ORM once per worker; from then on `sync_to_async(orm_fn)()` works without WSGI | `nautobot-app-mcp` `start_mcp_dev_server.py` L95 |
+| `mcp.run(transport="sse")` for production | FastMCP's built-in SSE transport; runs the server loop natively | `nautobot-app-mcp` `start_mcp_server.py` L71 |
+
+### REMOVED (Embedded Architecture — No Longer Needed)
+
+| Removal | Rationale |
+|---------|-----------|
+| `asgiref.wsgi.WsgiToAsgi` bridge | No longer bridging WSGI↔ASGI — FastMCP runs as a standalone ASGI/SSE server, not inside Django |
+| `daemon thread` for lifespan management | No shared event loop with Django; FastMCP owns its own event loop in the separate process |
+| `StreamableHTTPSessionManager` (Django-hosted) | The session manager lives inside FastMCP's own process; no longer needs to be instantiated by Django code |
+| `async_to_sync` WSGI→ASGI bridge in `view.py` | `mcp_view()` Django view endpoint is deleted entirely; MCP has its own HTTP endpoint |
+| `contextvars.ContextVar` for Django request passthrough | No need to thread Django requests into FastMCP — they are separate processes |
+| 8 concurrency primitives (locks, doublets, ContextVars) | Eliminated entirely: no lazy factory with double-check locking, no `_mcp_tool_state` on `RequestContext`, no `_cached_user` monkey-patching |
+| `urls.py` with `path("mcp/", mcp_view)` | No Django URL routing for MCP — separate process has its own port/endpoint |
+| `mcp._list_tools_mcp` override for progressive disclosure | FastMCP 3.x native tool listing used directly; progressive disclosure via scope-checking decorator or session dict in FastMCP's own session state |
+
+### KEPT (Existing Code That Transfers to Separate-Process)
+
+| Kept Item | What Changes |
+|-----------|--------------|
+| `MCPToolRegistry` singleton (`registry.py`) | Still in-memory singleton, but now inside FastMCP's process (no Django RequestContext) |
+| `register_mcp_tool()` API (`mcp/tools/__init__.py`) | Works identically — called via `post_migrate` signal or at `create_app()` startup |
+| `ToolDefinition` dataclass (`registry.py`) | Unchanged |
+| `sync_to_async(fn, thread_sensitive=True)` ORM wrappers | Still needed inside `async def tool_handler()` — wraps Django ORM calls in FastMCP's async context |
+| `PaginatedResult`, cursor encoding (`pagination.py`) | Unchanged — FastMCP async tools call the same pagination helpers |
+| Auth: `get_user_from_request()`, `.restrict()`, `AnonymousUser` fallback | Still needed; auth context comes from FastMCP request headers (no Django `request` involved) |
+| `MCPSessionState`, session tools (`session_tools.py`) | Session dict is now a plain `dict` keyed by FastMCP session ID — no monkey-patching on `RequestContext` |
+| 10 core read tools (`mcp/tools/core.py`) | Unchanged signatures; `sync_to_async` wrappers still needed |
+| `mcp/tools/query_utils.py` | Unchanged — query building helpers used by tools |
+| All 78 tests | Rewrite `test_view.py` to test the management command entry point instead of the Django endpoint; others largely unchanged |
+
+---
+
+## uvicorn — Dev Server Hot-Reload
+
+### Why uvicorn Is Needed
+
+`nautobot-app-mcp` uses `uvicorn.run()` in `start_mcp_dev_server.py` specifically for **hot-reload**:
+
+```python
+uvicorn.run(
+    "nautobot_mcp.management.commands.start_mcp_dev_server:create_app",
+    host=host,
+    port=port,
+    reload=True,
+    reload_dirs=reload_dirs,
+    reload_delay=0.25,
+    timeout_keep_alive=0,
+    timeout_graceful_shutdown=1,
+)
+```
+
+- `reload=True` — uvicorn watches source files and restarts the worker on changes
+- `reload_dirs=[tools_dir, custom_tools_dir]` — watches tool directories specifically
+- `create_app()` factory — called by uvicorn on each reload; calls `nautobot.setup()` fresh each time
+- `timeout_keep_alive=0` — prevents hanging connections during reloads
+
+### Production vs Development
+
+| Environment | Transport | Server | Notes |
+|-------------|-----------|--------|-------|
+| **Production** | `mcp.run(transport="sse")` | FastMCP native loop | systemd-managed; no uvicorn |
+| **Development** | `uvicorn.run(reload=True)` | uvicorn ASGI server | Auto-reload on file changes; `create_app()` factory |
+
+### Version
+
+uvicorn is **already a transitive dependency** of `fastmcp ^3.2.0` (`fastmcp` requires `uvicorn >= 0.35`). The current lock shows `uvicorn 0.42.0`. No new direct dependency needed — just use it from the existing transitive.
+
+---
+
+## Integration: How the Two Processes Communicate
+
+```
+┌─────────────────────────────────────┐
+│  Nautobot Django App (port 8080)    │  ← Existing: REST API, admin UI
+│  - Nautobot ORM                     │
+│  - Token auth via Token model       │
+│  - post_migrate signal              │
+└─────────────────────────────────────┘
+            ▲
+            │ Nautobot ORM (direct, no network)
+            │ nautobot.setup() bootstraps once per worker
+            │
+┌─────────────────────────────────────┐
+│  FastMCP Separate Process (port N)  │  ← NEW: MCP protocol endpoint
+│  - FastMCP SSE/streamable-http      │
+│  - MCPToolRegistry (in-memory)      │
+│  - sync_to_async ORM wrappers       │
+│  - Plain dict session state         │
+│  - start_mcp_server (prod: mcp.run) │
+│  - start_mcp_dev_server (dev: uvicorn)│
+└─────────────────────────────────────┘
+            ▲
+            │ MCP protocol (HTTP/SSE)
+            │ Authorization: Token <key>
+            │
+┌─────────────────────────────────────┐
+│  AI Agent (Claude Code, MCP client) │
+└─────────────────────────────────────┘
+```
+
+**Key integration decisions:**
+- FastMCP separate process uses **direct Django ORM** via `nautobot.setup()` — no REST API, no network hop
+- Auth token still comes from Nautobot's `users.models.Token` table — FastMCP process imports it directly
+- No inter-process communication layer needed — both processes share the same database
+- Management commands register tools at startup (via `post_migrate` signal or direct call in `create_app()`)
 
 ---
 
 ## Installation
 
-No new packages required. All needed APIs are already present:
+### `pyproject.toml` Changes
 
-```python
-# Already installed via fastmcp / Django — just import them
-from asgiref.sync import async_to_sync                              # ← THE critical fix
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager  # ← session manager
-from starlette.datastructures import Headers                        # ← for header parsing in send()
-from starlette.types import Scope, Receive, Send                   # ← ASGI type hints
-import contextvars                                                   # ← stdlib: pass Django request into async ctx
+```toml
+[tool.poetry.dependencies]
+python = ">=3.10,<3.15"
+
+# Keep existing
+nautobot = ">=3.0.0,<4.0.0"
+fastmcp = "^3.2.0"
+python-dotenv = "*"
+requests = "*"
+
+# ADD: uvicorn explicitly (already transitive via fastmcp, but needed for
+# uvicorn.run() API in start_mcp_dev_server.py)
+uvicorn = { version = ">=0.35.0", extras = ["standard"] }
+
+# REMOVE: asgiref is no longer needed for the WSGI→ASGI bridge
+# (ships with Nautobot as a transitive dep; no direct use needed)
 ```
+
+> **Note on `uvicorn[standard]`:** The `standard` extra includes the `uvicorn` CLI and standard ASGI server components. Since `fastmcp` already requires `uvicorn >= 0.35`, adding it explicitly with `extras = ["standard"]` pins a minimum version and ensures the full uvicorn API (`run()`, `Config`) is available. Without `standard`, only `uvicorn.importer` would be available.
+
+### Dev Dependencies — No Change
+
+All existing dev dependencies (`invoke`, `ruff`, `pylint`, `coverage`, etc.) remain. No new dev-only deps needed.
 
 ---
 
-## Why `async_to_sync` Is Correct (and `asyncio.run()` Is Broken)
+## Alternatives Considered
 
-### The Problem with `asyncio.run()`
-
-Every call to `asyncio.run()`:
-1. **Creates a brand-new event loop** on the current thread
-2. Runs the coroutine to completion inside it
-3. **Destroys the loop** when done — including all session state held by `StreamableHTTPSessionManager`
-
-`StreamableHTTPSessionManager._server_instances` (a `dict`) lives on the session manager **instance**, but the `_task_group` (an `anyio.create_task_group()`) — and crucially, the **tasks running inside it** — are bound to the event loop that was destroyed.
-
-**Result:** Every HTTP request starts with a blank slate. The session manager has no running tasks, no session state, and `Server.request_context.get()` raises `LookupError` on every production request.
-
-### How `async_to_sync` Works (from `asgiref/sync.py` source)
-
-```
-async_to_sync(my_async_func)(args...)
-    │
-    ├─ Creates a Future (call_result) on the current thread
-    ├─ Creates a CurrentThreadExecutor on the current thread
-    ├─ Schedules the async work onto the main event loop (if one exists)
-    │     OR creates a new loop in a single ThreadPoolExecutor (if no loop)
-    ├─ Blocks the WSGI worker thread on CurrentThreadExecutor.run_until_future()
-    ├─ The async work runs to completion, including all task_group tasks
-    └─ Returns result — event loop is NOT destroyed
-```
-
-Key behavior (lines 281–318 of `asgiref/sync.py`):
-
-```python
-if self.main_event_loop is not None:
-    # If we're in a thread that already has a running loop:
-    self.main_event_loop.call_soon_threadsafe(
-        self.main_event_loop.create_task, awaitable
-    )
-    current_executor.run_until_future(call_result)  # Block, wait, don't destroy
-else:
-    # Fallback: new loop in a thread
-    loop_executor = ThreadPoolExecutor(max_workers=1)
-    loop_future = loop_executor.submit(asyncio.run, new_loop_wrap())
-    current_executor.run_until_future(loop_future)
-    loop_future.result()
-```
-
-**In WSGI (no running loop):** `async_to_sync` creates a new loop in a background thread via `ThreadPoolExecutor.submit(asyncio.run, ...)`. This loop stays alive as long as the executor's future hasn't resolved. While it runs, **all async work completes**, including session task groups.
-
-**In ASGI (already has a loop):** `async_to_sync` reuses the existing loop — safe because the loop is managed by the ASGI server, not destroyed after each call.
-
-### Why You Cannot Call `async_to_sync` from Inside a Running Loop
-
-```python
-# This raises RuntimeError in asgiref/sync.py line 233:
-# "You cannot use AsyncToSync in the same thread as an async event loop"
-async def my_view(request):
-    await async_to_sync(some_async_fn)()  # WRONG — we're already inside the loop
-```
-
-Django WSGI workers have **no running event loop** (they're synchronous threads). `async_to_sync` is exactly the right tool.
-
-### Why You Cannot Use `asyncio.run()` Inside `async_to_sync`
-
-`asyncio.run()` is used **once**, inside the ThreadPoolExecutor's single background thread (line 314 of `asgiref/sync.py`):
-```python
-loop_future = loop_executor.submit(asyncio.run, new_loop_wrap())
-```
-After that, the executor blocks on the future. The loop is not destroyed until `loop_future.result()` returns.
+| Recommended | Alternative | When to Use Alternative |
+|------------|-------------|------------------------|
+| `uvicorn` for dev server | `hypercorn` | Hypercorn has better Windows support and is used by some FastMCP deployments, but uvicorn is FastMCP's default and is already a transitive dep — no reason to add another server |
+| `nautobot.setup()` + `sync_to_async` ORM | REST API calls between processes | REST adds network overhead and requires API token scoping; direct ORM is zero-latency and uses the same auth token model |
+| `mcp.run(transport="sse")` production | `streamable-http` transport | `streamable-http` is more complex and requires the `StreamableHTTPSessionManager` pattern (the same complexity the refactor is trying to escape); SSE is FastMCP's recommended production transport |
+| Django management commands as entry point | `__main__.py` standalone script | Management commands integrate with Nautobot's plugin system (`nautobot setup()`), Docker entry points, and systemd service files naturally — no reason to bypass them |
 
 ---
 
-## How to Build the ASGI Scope (django-mcp-server Pattern)
+## What NOT to Use
 
-**Source:** `mcp_server/djangomcp.py`, `_call_starlette_handler()` function
-
-```python
-from __future__ import annotations
-
-import json
-import contextvars
-
-from asgiref.sync import async_to_sync
-from django.conf import settings
-from django.core.serializers.json import DjangoJSONEncoder
-from django.http import HttpRequest
-from starlette.datastructures import Headers
-from starlette.types import Scope, Receive, Send
-
-django_request_ctx: contextvars.ContextVar[HttpRequest] = contextvars.ContextVar(
-    "django_request"
-)
-
-async def _call_starlette_handler(
-    django_request: HttpRequest,
-    session_manager: StreamableHTTPSessionManager,
-) -> HttpResponse:
-    """Bridge a Django request into the FastMCP session manager."""
-    django_request_ctx.set(django_request)
-    body = json.dumps(django_request.data, cls=DjangoJSONEncoder).encode("utf-8")
-
-    scope: Scope = {
-        "type": "http",
-        "http_version": "1.1",
-        "method": django_request.method,
-        "headers": [
-                       (key.lower().encode("latin-1"), value.encode("latin-1"))
-                       for key, value in django_request.headers.items()
-                       if key.lower() != "content-length"
-                   ] + [("Content-Length", str(len(body)).encode("latin-1"))],
-        "path": django_request.path,
-        "raw_path": django_request.get_full_path().encode("utf-8"),
-        "query_string": django_request.META["QUERY_STRING"].encode("latin-1"),
-        "scheme": "https" if django_request.is_secure() else "http",
-        "client": (django_request.META.get("REMOTE_ADDR"), 0),
-        "server": (django_request.get_host(), django_request.get_port()),
-    }
-
-    async def receive() -> Receive:
-        return {"type": "http.request", "body": body, "more_body": False}
-
-    response_started: dict = {}
-    response_body = bytearray()
-
-    async def send(message: Send) -> None:
-        if message["type"] == "http.response.start":
-            response_started["status"] = message["status"]
-            response_started["headers"] = Headers(raw=message["headers"])
-        elif message["type"] == "http.response.body":
-            response_body.extend(message.get("body", b""))
-
-    # MUST use session_manager.run() context manager
-    async with session_manager.run():
-        await session_manager.handle_request(scope, receive, send)
-
-    status = response_started.get("status", 500)
-    headers = response_started.get("headers", {})
-
-    response = HttpResponse(bytes(response_body), status=status)
-    for key, value in headers.items():
-        response[key] = value
-    return response
-```
-
-### Key Differences from Current `view.py`
-
-| Field | Current (BROKEN) | django-mcp-server (CORRECT) |
-|-------|-----------------|-----------------------------|
-| `"server"` | `("127.0.0.1", 8080)` hardcoded | `(request.get_host(), request.get_port())` |
-| `"scheme"` | Missing | `"https" if request.is_secure() else "http"` |
-| `"raw_path"` | Missing | `request.get_full_path().encode("utf-8")` |
-| `"client"` | Missing | `(request.META.get("REMOTE_ADDR"), 0)` |
-| `"Content-Length"` | Missing | Explicitly added (divides POST body) |
-| `receive()` | Returns `{"body": b"", ...}` (empty body) | Uses actual request body |
-| `session_manager.run()` | NOT called — just `asyncio.run(mcp_app(...))` | **MUST call `async with session_manager.run():`** |
-| HTTP bridge | `asyncio.run(mcp_app(...))` | `async_to_sync(_call_starlette_handler)(request, session_manager)` |
-| `csrf_exempt` | Missing | DRF view handles it via decorator |
-| DRF request body | `request.body` raw bytes | `json.dumps(request.data, cls=DjangoJSONEncoder)` |
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| `asgiref.wsgi.WsgiToAsgi` | This is the embedded architecture that causes the 8-concurrency-primitives complexity; separate-process eliminates it entirely | No WSGI→ASGI bridge needed |
+| `StreamableHTTPSessionManager` in Django | Session manager belongs inside FastMCP's process, not Django's | FastMCP's native session management |
+| `daemon thread` for event loop persistence | Elimininated — FastMCP owns its event loop in the separate process | No daemon thread needed |
+| `contextvars.ContextVar` for Django request passthrough | Separate process = no Django request to pass through | Direct ORM access after `nautobot.setup()` |
+| `mcp._list_tools_mcp` override | This was a workaround for FastMCP inside Django; standalone FastMCP handles this natively | FastMCP's built-in `@mcp.list_tools()` decorator |
+| `async_to_sync` for WSGI bridging | Only `sync_to_async` is needed for ORM calls inside async tool handlers | `sync_to_async(fn, thread_sensitive=True)` |
 
 ---
 
-## `StreamableHTTPSessionManager` with `stateless=True`
+## Stack Patterns by Variant
 
-**Source:** `mcp/server/streamable_http_manager.py`, `StreamableHTTPSessionManager` class
+**If production deployment:**
+- Use `start_mcp_server.py` management command with `mcp.run(transport="sse")`
+- Manage via systemd service (not uvicorn)
+- `nautobot.setup()` called once at worker startup
 
-### Constructor
-
-```python
-class StreamableHTTPSessionManager:
-    def __init__(
-        self,
-        app: MCPServer[Any, Any],
-        event_store: EventStore | None = None,
-        json_response: bool = False,
-        stateless: bool = False,       # ← key parameter
-        security_settings: TransportSecuritySettings | None = None,
-        retry_interval: int | None = None,
-    ):
-        self.app = app
-        self.event_store = event_store
-        self.json_response = json_response
-        self.stateless = stateless
-        # Session tracking dict — only populated when stateless=False
-        self._server_instances: dict[str, StreamableHTTPServerTransport] = {}
-        self._session_creation_lock = anyio.Lock()
-        self._task_group = None
-        self._run_lock = anyio.Lock()
-        self._has_started = False
-```
-
-### `run()` Context Manager (Critical — Must Be Used)
-
-```python
-@contextlib.asynccontextmanager
-async def run(self) -> AsyncIterator[None]:
-    """Creates task group for session operations. MUST be called before handle_request()."""
-    async with self._run_lock:
-        if self._has_started:
-            raise RuntimeError(
-                "StreamableHTTPSessionManager .run() can only be called "
-                "once per instance. Create a new instance if you need to run again."
-            )
-        self._has_started = True
-
-    async with anyio.create_task_group() as tg:
-        self._task_group = tg
-        yield
-        tg.cancel_scope.cancel()
-```
-
-**`handle_request()` requires `run()` to be active:**
-
-```python
-async def handle_request(self, scope, receive, send) -> None:
-    if self._task_group is None:
-        raise RuntimeError("Task group is not initialized. Make sure to use run().")
-    if self.stateless:
-        await self._handle_stateless_request(scope, receive, send)
-    else:
-        await self._handle_stateful_request(scope, receive, send)
-```
-
-**Why `run()` is required:** In both stateless and stateful modes, `handle_request()` calls `await tg.start(run_server)` which **spawns the MCP server task** inside the task group. Without `run()`, there's no task group, and `handle_request()` raises `RuntimeError`.
-
-### `stateless=True` vs `stateless=False`
-
-| Behavior | `stateless=True` | `stateless=False` (current / correct) |
-|----------|-------------------|----------------------------------------|
-| Session ID header | Ignored (`mcp_session_id=None`) | Reads `Mcp-Session-Id`, creates new UUID if missing |
-| Session transport store | `_server_instances` NOT used | Sessions persist across requests in `_server_instances[session_id]` |
-| Event store | `event_store=None` | Uses `self.event_store` (may be None) |
-| HTTP methods allowed | `["POST", "DELETE"]` only (GET = SSE streaming, no session to stream to) | `["GET", "POST", "DELETE"]` |
-| Server task lifecycle | Created + terminated per request | Persists across requests in `_server_instances` |
-| FastMCP `stateless=` arg | `stateless=True` passed to `app.run()` | `stateless=False` passed to `app.run()` |
-
-### For `nautobot-app-mcp-server`: Keep `stateless_http=False`
-
-The project needs session state for progressive disclosure. `stateless=True` would make session dicts ephemeral per-request — **undoing the very fix** being applied.
-
-**CORRECT config (keep as-is in `server.py`):**
-```python
-_mcp_app = mcp_instance.http_app(
-    path="/mcp",
-    transport="streamable-http",
-    stateless_http=False,  # ← Keep — need session state for progressive disclosure
-    json_response=True,
-)
-```
-
----
-
-## Auth Layer: Caching Patterns
-
-### Current Auth (No Caching) — `mcp/auth.py`
-
-```python
-def get_user_from_request(ctx: ToolContext):
-    ...
-    token = Token.objects.select_related("user").get(key=real_token_key)
-    return token.user
-```
-
-Each tool call → DB query. For batch MCP requests (multiple tool calls), this multiplies.
-
-### Recommended Fix: MCP Session Cache
-
-Cache on the MCP `request_context.session` dict — naturally scoped to the MCP session lifetime and survives `async_to_sync` (the same session dict is used across all tool calls in a session):
-
-```python
-def get_user_from_request(ctx: ToolContext):
-    """Get cached user or look up token, caching on MCP session dict."""
-    mcp_request = ctx.request_context.request
-    auth_header = mcp_request.headers.get("Authorization", "")
-    if not auth_header or not auth_header.startswith("Token "):
-        return AnonymousUser()
-
-    token_key = auth_header[6:]
-    if not token_key.startswith(TOKEN_PREFIX):
-        return AnonymousUser()
-    real_token_key = token_key[len(TOKEN_PREFIX):]
-
-    # Check MCP session cache first
-    session = ctx.request_context.session
-    if "cached_user" in session:
-        return session["cached_user"]
-
-    # DB lookup
-    try:
-        from nautobot.users.models import Token
-        token = Token.objects.select_related("user").get(key=real_token_key)
-        user = token.user
-    except Exception:  # noqa: BLE001
-        return AnonymousUser()
-
-    # Store in MCP session cache
-    session["cached_user"] = user
-    return user
-```
-
-This is superior to thread-local or `lru_cache` because it naturally scopes to the MCP session (not the HTTP request — which may be short-lived in WSGI workers).
-
----
-
-## Exact Import Changes for `view.py`
-
-### Add These Imports
-
-```python
-from __future__ import annotations
-
-import json                                    # ← ADD (for body serialization)
-from typing import TYPE_CHECKING
-
-from asgiref.sync import async_to_sync         # ← ADD (replaces asyncio)
-from django.core.serializers.json import DjangoJSONEncoder  # ← ADD
-from starlette.datastructures import Headers   # ← ADD (for ASGI send())
-from starlette.types import Scope, Receive, Send  # ← ADD (ASGI type hints)
-import contextvars                             # ← ADD (request context passthrough)
-```
-
-### Remove These Imports
-
-```python
-# REMOVE — asyncio.run() is the broken pattern that destroys sessions
-import asyncio  # REMOVE from view.py
-```
-
----
-
-## Integration Points
-
-### 1. `view.py` — Replace the Bridge Entirely
-
-The entire `mcp_view()` function needs to be rewritten:
-1. Build ASGI scope from Django request (mirror django-mcp-server)
-2. Wrap `_call_starlette_handler` with `async_to_sync`
-3. Return Django `HttpResponse`
-
-The `session_manager.run()` context manager must be entered **inside** `_call_starlette_handler` (which is itself async), not outside.
-
-### 2. `server.py` — Create `StreamableHTTPSessionManager` as a Module-Level Singleton
-
-django-mcp-server creates `global_mcp_server = DjangoMCP(...)` at module level. For nautobot-app-mcp-server:
-
-```python
-# server.py — expose session manager alongside the ASGI app
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-
-_mcp_app: Starlette | None = None
-_mcp_session_manager: StreamableHTTPSessionManager | None = None
-
-def get_session_manager() -> StreamableHTTPSessionManager:
-    """Lazily build the session manager + FastMCP app on first request."""
-    global _mcp_session_manager, _mcp_app
-    if _mcp_session_manager is None:
-        mcp_instance = _setup_mcp_app()
-        _mcp_session_manager = StreamableHTTPSessionManager(
-            app=mcp_instance._mcp_server,
-            event_store=None,
-            json_response=True,
-            stateless=False,  # Need state for progressive disclosure
-        )
-        _mcp_app = mcp_instance.http_app(
-            path="/mcp",
-            transport="streamable-http",
-            stateless_http=False,
-            json_response=True,
-        )
-    return _mcp_session_manager
-```
-
-Both `_mcp_session_manager` and `_mcp_app` are created atomically on first request.
-
-### 3. `contextvars` for Django Request Pass-Through
-
-django-mcp-server stores the Django request in a `contextvars.ContextVar` inside `_call_starlette_handler`:
-
-```python
-django_request_ctx: contextvars.ContextVar[HttpRequest] = contextvars.ContextVar(
-    "django_request"
-)
-
-async def _call_starlette_handler(django_request, session_manager):
-    django_request_ctx.set(django_request)  # ← available to async tool code
-```
-
-This allows async tool wrappers to reconstruct a Django-like request without depending on MCP internals. Currently, nautobot-app-mcp-server uses `ctx.request_context.request` (the MCP request object) — this is **still correct** and should be kept. The `contextvars` approach is only needed if you need the actual Django `HttpRequest` inside tool handlers.
-
-### 4. `auth.py` — Add MCP Session Cache
-
-Add session-level caching to `get_user_from_request()` to avoid per-tool-call DB lookups. Cache on `ctx.request_context.session["cached_user"]`.
-
----
-
-## What NOT to Add
-
-| Pattern | Why Avoid | Use Instead |
-|---------|-----------|-------------|
-| `asyncio.run()` in view | Destroys session state every request | `async_to_sync()` |
-| `stateless=True` | Kills session state; reverts the fix | Keep `stateless=False` |
-| `lru_cache` on `get_user_from_request` | No invalidation; thread-unsafe in WSGI thread pools | MCP session cache |
-| DRF `APIView` | Over-engineered; Nautobot doesn't use DRF auth | Plain Django view + custom auth |
-| `django_mcp_server` package | Opinionated tool registration (metaclass); not needed | Keep `MCPToolRegistry` singleton |
-| `FastMCP.http_app()` called per-request | Factory method; should be called once | Module-level singleton (`_mcp_app`, `_mcp_session_manager`) |
-| `run()` called twice on same `StreamableHTTPSessionManager` instance | Raises `RuntimeError: .run() can only be called once per instance` | One session manager instance, reused across requests |
-
-### The `run()` Per-Request Trap — Explained
-
-django-mcp-server calls `run()` inside `_call_starlette_handler`, which is itself wrapped in `async_to_sync`. Since `async_to_sync` runs in a **background thread with a persistent loop** (the ThreadPoolExecutor's loop stays alive until `loop_future.result()` returns), each HTTP request gets its own `run()` context entered and exited cleanly. The `run()` context manager exits after `handle_request()` completes, but the **same session manager instance** is reused on the next request — with a new `run()` call, which works because the ThreadPoolExecutor creates a fresh loop per `asyncio.run()` call inside `async_to_sync`.
+**If development with hot-reload:**
+- Use `start_mcp_dev_server.py` management command with `uvicorn.run(reload=True)`
+- `create_app()` factory called by uvicorn on each reload
+- `nautobot.setup()` called fresh on each reload
 
 ---
 
 ## Version Compatibility
 
-| Package | Version in Project | Compatible With | Notes |
-|---------|-------------------|-----------------|-------|
-| `fastmcp` | `^3.2.0` | `mcp>=1.8.0,<2.0.0` | Pins upper bound on `mcp` at `<2.0` |
-| `mcp` (transitive) | from fastmcp | `StreamableHTTPSessionManager` API stable | Source-verified in `.venv/.../mcp/server/streamable_http_manager.py` |
-| `asgiref` | ships with Django / fastmcp | `async_to_sync` stable since asgiref 1.x | Source-verified in `.venv/.../asgiref/sync.py` |
-| `starlette` | ships with fastmcp | `Headers`, `Scope`, `Receive`, `Send` stable | Source-verified in django-mcp-server usage |
-| Django | `>=3.0,<4.0` | `DjangoJSONEncoder`, `HttpRequest`, session backends | Already installed via Nautobot dep |
+| Package | Version | Compatible With | Notes |
+|---------|---------|-----------------|-------|
+| `fastmcp` | `^3.2.0` (existing) | `mcp >=1.24.0,<2.0` | Already installed; `mcp.run(transport="sse")` stable |
+| `uvicorn` | `>=0.35.0` (existing transitive; locked `0.42.0`) | FastMCP requires `>=0.35`; full API (`run()`, `Config`) via `uvicorn[standard]` | No change to Nautobot compatibility |
+| `nautobot` | `>=3.0.0,<4.0.0` (existing) | `nautobot.setup()` available since Nautobot 1.x; stable | `nautobot.setup()` initializes ORM without WSGI |
+| `asgiref` | ships with Nautobot/FastMCP | `sync_to_async` unchanged | Still used for ORM wrappers inside async tool handlers |
+| `mcp` (transitive via fastmcp) | `>=1.24.0,<2.0` | `StreamableHTTPSessionManager` not needed in separate-process | FastMCP native session management replaces it |
+| Python | `>=3.10,<3.15` (existing) | `nautobot.setup()` requires 3.10+ | Unchanged |
 
 ---
 
 ## Sources
 
-- `mcp/server/streamable_http_manager.py` (mcp SDK, installed via fastmcp) — `StreamableHTTPSessionManager.__init__`, `run()`, `handle_request()`, `_handle_stateless_request()`, `_handle_stateful_request()` — **source-verified**
-- `asgiref/sync.py` (installed via Django) — `AsyncToSync.__call__` (lines 211–325), `main_wrap` pattern, ThreadPoolExecutor + asyncio.run usage — **source-verified**
-- `mcp_server/djangomcp.py` (django-mcp-server v0.5.6, github.com/gts360/django-mcp-server) — `_call_starlette_handler`, `DjangoMCP.handle_django_request`, `session_manager` property, `async_to_sync` usage — **source-verified via WebFetch**
-- `mcp_server/views.py` (django-mcp-server v0.5.6) — `MCPServerStreamableHttpView`, `csrf_exempt`, DRF APIView pattern — **source-verified via WebFetch**
-- `pyproject.toml` — existing dependency versions: `fastmcp = "^3.2.0"`, `python = ">=3.10,<3.15"`
-- `docs/dev/mcp-implementation-analysis.md` — architecture analysis, P0/P1 issue triage (source-verified)
-- `nautobot_app_mcp_server/mcp/server.py` — current broken `get_mcp_app()` implementation (source-verified)
-- `nautobot_app_mcp_server/mcp/view.py` — current broken `asyncio.run()` bridge (source-verified)
+- `nautobot-app-mcp` (`nautobot_mcp/management/commands/start_mcp_server.py`) — production management command with `mcp.run(transport="sse")` — **source-verified**
+- `nautobot-app-mcp` (`nautobot_mcp/management/commands/start_mcp_dev_server.py`) — dev management command with `uvicorn.run(reload=True)` and `create_app()` factory — **source-verified**
+- `nautobot-app-mcp/pyproject.toml` — reference stack (`mcp ^1.6.0`, no explicit uvicorn, `python ^3.8`) — **source-verified**
+- `nautobot-app-mcp-server/pyproject.toml` — current dependencies (`fastmcp ^3.2.0`, `nautobot >=3.0.0,<4.0.0`) — **source-verified**
+- `nautobot-app-mcp-server/.planning/STATE.md` — current embedded architecture (8 concurrency primitives, daemon thread, monkey-patched RequestContext) — **source-verified**
+- `nautobot-app-mcp-server/.planning/PROJECT.md` — v1.2.0 milestone: separate-process goal, `start_mcp_server.py`, `start_mcp_dev_server.py`, `nautobot.setup()` — **source-verified**
 
 ---
 
-## GSD Execution Notes
+## Phase 1 Stack Additions Checklist
 
-For the v1.1.0 refactor, the **exact changes needed** in `view.py`:
+For `/gsd:roadmapper` consumption — Phase 1 needs:
 
-1. **Add imports:** `async_to_sync`, `Headers`, `Scope/Receive/Send`, `DjangoJSONEncoder`, `json`, `contextvars`
-2. **Remove** `import asyncio`
-3. **Define** `django_request_ctx` as a module-level `contextvars.ContextVar`
-4. **Define** `_call_starlette_handler` async function (mirror django-mcp-server's)
-5. **In `mcp_view`:** Replace `asyncio.run(mcp_app(...))` with `async_to_sync(_call_starlette_handler)(request, session_manager)`
-6. **Expose** `get_session_manager()` from `server.py` and call it in `view.py`
-7. **In `server.py`:** Create `StreamableHTTPSessionManager` alongside the app factory, store as module-level singleton
+```toml
+# pyproject.toml additions
+[tool.poetry.dependencies]
+uvicorn = { version = ">=0.35.0", extras = ["standard"] }
+# No removal of fastmcp or nautobot
+# asgiref remains as transitive dep but is no longer directly imported in mcp/ code
+```
 
-The `session_manager.run()` is called **inside** `_call_starlette_handler` (which is wrapped by `async_to_sync`). The `run()` context is entered and exited per request — this is the correct pattern from django-mcp-server.
+```
+Files ADDED:
+  nautobot_app_mcp_server/management/__init__.py
+  nautobot_app_mcp_server/management/commands/__init__.py
+  nautobot_app_mcp_server/management/commands/start_mcp_server.py
+  nautobot_app_mcp_server/management/commands/start_mcp_dev_server.py
 
-In `auth.py`: add session-level caching using `ctx.request_context.session["cached_user"]` to avoid per-tool-call DB lookups.
+Files REMOVED (or gutted):
+  nautobot_app_mcp_server/mcp/view.py       # WSGI→ASGI bridge deleted
+  nautobot_app_mcp_server/mcp/server.py     # Daemon thread + lazy factory deleted
+  nautobot_app_mcp_server/urls.py           # Django URL route for MCP deleted
+
+Files MODIFIED:
+  nautobot_app_mcp_server/mcp/session_tools.py  # RequestContext monkey-patching → plain dict
+  nautobot_app_mcp_server/mcp/auth.py          # _cached_user on RequestContext → plain dict
+  nautobot_app_mcp_server/__init__.py          # plugin config: remove embedded bridge wiring
+
+Files KEPT (unchanged, transferred to separate process):
+  nautobot_app_mcp_server/mcp/registry.py
+  nautobot_app_mcp_server/mcp/tools/__init__.py
+  nautobot_app_mcp_server/mcp/tools/core.py
+  nautobot_app_mcp_server/mcp/tools/pagination.py
+  nautobot_app_mcp_server/mcp/tools/query_utils.py
+  nautobot_app_mcp_server/mcp/auth.py (signature unchanged)
+  nautobot_app_mcp_server/mcp/session_tools.py (signature unchanged)
+```
+
+---
+
+*Stack research for: separate-process FastMCP server architecture (v1.2.0 refactor)*
+*Researched: 2026-04-05*
