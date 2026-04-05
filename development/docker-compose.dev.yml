@@ -48,6 +48,13 @@ services:
     volumes:
       - "./nautobot_config.py:/opt/nautobot/nautobot_config.py"
       - "../:/source"
+  mcp:
+    entrypoint: "tail -f /dev/null"   # placeholder; Phase 8 replaces with start_mcp_dev_server
+    ports:
+      - "8005:8005"
+    volumes:
+      - "./nautobot_config.py:/opt/nautobot/nautobot_config.py"
+      - "../:/source"
 # To expose postgres (5432), myql (3306) on db service or redis (6379) to the host uncomment the
 # following. Ensure to match the 2 idented spaces which to have the service nested under services.
 # db:
