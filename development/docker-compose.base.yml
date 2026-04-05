@@ -49,3 +49,9 @@ services:
     healthcheck:
       disable: true
     <<: *nautobot-base
+  mcp:
+    depends_on:
+      db:
+        condition: service_healthy
+    <<: *nautobot-base
+    # Phase 8: entrypoint: "nautobot-server start_mcp_dev_server"
