@@ -26,11 +26,12 @@ Two Django management commands that serve as standalone FastMCP server entry poi
 - **D-08:** Reload watch scoped to `nautobot_app_mcp_server/` directory only — not the entire project root. Faster restart, matches the files that change during MCP server development.
 
 ### P1-03: `create_app()` Factory
-- **D-09:** Signature: `create_app(host: str = "0.0.0.0", port: int = 8005) -> FastMMC` (where `MMC` is `FastMCP`)
+
+- **D-09:** Signature: `create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple[FastMCP, str, int]`
 - **D-10:** DB validation: `from django.db import connection; connection.ensure_connection()` — called first, before `nautobot.setup()`. Generic Django check, no Nautobot model dependency.
 - **D-11:** On DB failure: raises `RuntimeError("Database connectivity check failed: <detail>")`
 - **D-12:** After DB check: `import nautobot; nautobot.setup()` — bootstraps Django ORM for standalone process
-- **D-13:** Returns a configured `FastMCP` instance with `host`/`port` passed to the constructor
+- **D-13:** Returns `(mcp_instance, host, port)` — FastMCP 3.x does NOT accept `host`/`port` in the constructor (breaking change in 3.x). Production: `(mcp, host, port) = create_app(...); mcp.run(transport="sse", host=host, port=port)`. Dev: `uvicorn.run(mcp.http_app(transport="sse"), host=host, port=port, reload=True, reload_dirs=[str(watch_dir)])`
 
 ### P1-04: Environment Variable Configuration
 - **D-14:** `create_app()` reads `NAUTOBOT_CONFIG` from environment via `os.environ.get("NAUTOBOT_CONFIG")` — sets Django settings module before `nautobot.setup()`
