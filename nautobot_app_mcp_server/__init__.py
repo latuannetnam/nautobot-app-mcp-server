@@ -28,24 +28,50 @@ class NautobotAppMcpServerConfig(NautobotAppConfig):
 
         1. Call super().ready() FIRST so Nautobot registers our urls.py via
            NautobotAppConfig.ready() → plugin_patterns.append(...).
-        2. Connect post_migrate signal AFTER so register_mcp_tool() calls from
-           other apps (that fire on their own post_migrate) are already in the registry.
+        2. Import mcp.tools to trigger side-effect registration of all core tools
+           in MCPToolRegistry.
+        3. Write tool_registry.json to the package directory for cross-process
+           discovery by the standalone MCP server.
+
+        Note:
+            Does NOT use post_migrate. post_migrate never fires in the MCP server
+            process (Phase 8 runs django.setup() directly, not nautobot-server).
+            The MCP server reads tool_registry.json at startup instead.
         """
         super().ready()  # Registers URL patterns (MUST be first)
 
-        from django.db.models.signals import post_migrate
+        import json  # noqa: F401
+        import os  # noqa: F401
 
         import nautobot_app_mcp_server.mcp.tools  # noqa: F401
 
-        post_migrate.connect(self._on_post_migrate, sender=self)
+        from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry
 
-    @staticmethod
-    def _on_post_migrate(app_config, **kwargs) -> None:
-        """Register MCP tools after this app's migrations complete."""
-        if app_config.name == "nautobot_app_mcp_server":
-            from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry
+        registry = MCPToolRegistry.get_instance()
 
-            MCPToolRegistry.get_instance()
+        # Build payload for tool_registry.json
+        # Excludes 'func' (not JSON-serializable); input_schema included for
+        # client-side visibility without calling the server.
+        tools = registry.get_all()
+        payload = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "tier": tool.tier,
+                "app_label": tool.app_label,
+                "scope": tool.scope,
+                "input_schema": tool.input_schema,
+            }
+            for tool in tools
+        ]
+
+        # Write to package directory via __file__ (resolves correctly for both
+        # installed packages and editable dev installations).
+        package_dir = os.path.dirname(__file__)
+        json_path = os.path.join(package_dir, "tool_registry.json")
+
+        with open(json_path, "w") as f:
+            json.dump(payload, f, indent=2)
 
 
 config = NautobotAppMcpServerConfig  # pylint:disable=invalid-name
