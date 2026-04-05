@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: Milestone Goal
 status: executing
-last_updated: "2026-04-05T11:22:20Z"
+last_updated: "2026-04-05T12:00:00Z"
 last_activity: 2026-04-05
 progress:
   total_phases: 6
   completed_phases: 1
-  total_plans: 1
-  completed_plans: 3
+  total_plans: 6
+  completed_plans: 4
 ---
 
 # Project State — `nautobot-app-mcp-server`
@@ -21,11 +21,11 @@ progress:
 ## Current Position
 
 Phase: 09 (tool-registration-refactor) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-04-05
 
-Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Phase 9 executing (2/6 plans)
+Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Phase 9 executing (4/6 plans)
 
 **Phase 09-01 completed** (`09-01-SUMMARY.md`):
 
@@ -33,6 +33,12 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 - `@register_tool` decorator in `mcp/__init__.py`: ergonomic wrapper with auto-schema
 - All 10 core tools in `core.py` converted to `@register_tool` (net: 54 insertions, 245 deletions)
 - All 80 MCP tests pass
+
+**Phase 09-02 completed** (`09-PLAN-02-SUMMARY.md`):
+
+- `register_all_tools_with_mcp(mcp)` in `mcp/__init__.py`: iterates `MCPToolRegistry.get_all()` and calls `mcp.tool(func, name, description)` for each tool; added to `__all__`
+- `mcp/commands.py` STEP 4: replaced placeholder with real wiring — import `core` (side-effect registration) then call `register_all_tools_with_mcp(mcp)`
+- 79/80 MCP tests pass; 1 pre-existing failure in `test_signal_integration.py`
 
 **Phase 09-04 completed** (`09-PLAN-04-SUMMARY.md`):
 
