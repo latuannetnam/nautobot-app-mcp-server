@@ -126,8 +126,8 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 - [x] 09-01: `@register_tool` decorator — dual registration (in-memory dict + FastMCP `.tool()` wiring)
 - [x] 09-02: `register_all_tools_with_mcp()` — populates FastMCP from `MCPToolRegistry` at startup
 - [x] 09-03: Plugin `ready()` generates `tool_registry.json` (replaces `post_migrate`)
-- [ ] 09-04: All 10 core read tools refactored — `async def` + `sync_to_async(thread_sensitive=True)`
-- [ ] 09-05: No Django model imports at module level — lazy import audit and conversion
+- [x] 09-04: All 10 core read tools refactored — `async def` + `sync_to_async(thread_sensitive=True)`
+- [x] 09-05: No Django model imports at module level — lazy import audit and conversion
 - [ ] 09-06: Unit tests for `@register_tool` decorator and `register_all_tools_with_mcp()`
 
 **Known pitfalls:**
@@ -282,7 +282,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 | 6 | UAT & Smoke Tests | v1.1.0 | 1/1 | Complete | 2026-04-04 |
 | 7 | Setup | v1.2.0 | 1/3 | Complete | 2026-04-05 |
 | 8 | Infrastructure | v1.2.0 | 4/4 | Complete | 2026-04-05 |
-| 9 | Tool Registration | v1.2.0 | 4/6 | In Progress | — |
+| 9 | Tool Registration | v1.2.0 | 5/6 | In Progress | — |
 | 10 | Session State | v1.2.0 | 0/4 | Not started | — |
 | 11 | Auth Refactor | v1.2.0 | 0/4 | Not started | — |
 | 12 | Bridge Cleanup | v1.2.0 | 0/6 | Not started | — |
