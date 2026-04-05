@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from asgiref.sync import sync_to_async
 from fastmcp.server.context import Context as ToolContext
 
-from nautobot_app_mcp_server.mcp import register_mcp_tool
+from nautobot_app_mcp_server.mcp import register_tool
 from nautobot_app_mcp_server.mcp.auth import get_user_from_request
 from nautobot_app_mcp_server.mcp.tools import query_utils
 
@@ -23,6 +23,11 @@ TOOLS_TIER = "core"
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description="List network devices with status, platform, location, and more.",
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _device_list_handler(
     ctx: ToolContext,
     limit: int = 25,
@@ -47,35 +52,16 @@ async def _device_list_handler(
     )
 
 
-register_mcp_tool(
-    name="device_list",
-    func=_device_list_handler,
-    description="List network devices with status, platform, location, and more.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "default": 25,
-                "description": "Maximum number of devices to return (default 25, max 1000).",
-            },
-            "cursor": {
-                "type": "string",
-                "description": "Pagination cursor from a previous response.",
-            },
-        },
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
-
-
 # -------------------------------------------------------------------
 # device_get
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description="Get a single device by name or ID, with interfaces prefetched.",
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _device_get_handler(
     ctx: ToolContext,
     name_or_id: str,
@@ -98,31 +84,16 @@ async def _device_get_handler(
     return await sync_to_async(query_utils._sync_device_get, thread_sensitive=True)(user=user, name_or_id=name_or_id)
 
 
-register_mcp_tool(
-    name="device_get",
-    func=_device_get_handler,
-    description="Get a single device by name or ID, with interfaces prefetched.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "name_or_id": {
-                "type": "string",
-                "description": "Device name (e.g. 'router-01') or UUID primary key.",
-            },
-        },
-        "required": ["name_or_id"],
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
-
-
 # -------------------------------------------------------------------
 # interface_list
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description="List network interfaces, optionally filtered by device name.",
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _interface_list_handler(
     ctx: ToolContext,
     device_name: str | None = None,
@@ -146,39 +117,16 @@ async def _interface_list_handler(
     )
 
 
-register_mcp_tool(
-    name="interface_list",
-    func=_interface_list_handler,
-    description="List network interfaces, optionally filtered by device name.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "device_name": {
-                "type": "string",
-                "description": "Optional device name to filter interfaces by.",
-            },
-            "limit": {
-                "type": "integer",
-                "default": 25,
-                "description": "Maximum number of interfaces to return (default 25, max 1000).",
-            },
-            "cursor": {
-                "type": "string",
-                "description": "Pagination cursor from a previous response.",
-            },
-        },
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
-
-
 # -------------------------------------------------------------------
 # interface_get
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description="Get a single interface by name or ID, with IP addresses prefetched.",
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _interface_get_handler(
     ctx: ToolContext,
     name_or_id: str,
@@ -199,31 +147,16 @@ async def _interface_get_handler(
     return await sync_to_async(query_utils._sync_interface_get, thread_sensitive=True)(user=user, name_or_id=name_or_id)
 
 
-register_mcp_tool(
-    name="interface_get",
-    func=_interface_get_handler,
-    description="Get a single interface by name or ID, with IP addresses prefetched.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "name_or_id": {
-                "type": "string",
-                "description": "Interface name (e.g. 'ge-0/0/0') or UUID primary key.",
-            },
-        },
-        "required": ["name_or_id"],
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
-
-
 # -------------------------------------------------------------------
 # ipaddress_list
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description="List IP addresses with tenant, VRF, status, and role.",
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _ipaddress_list_handler(
     ctx: ToolContext,
     limit: int = 25,
@@ -245,35 +178,16 @@ async def _ipaddress_list_handler(
     )
 
 
-register_mcp_tool(
-    name="ipaddress_list",
-    func=_ipaddress_list_handler,
-    description="List IP addresses with tenant, VRF, status, and role.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "default": 25,
-                "description": "Maximum number of IP addresses to return (default 25, max 1000).",
-            },
-            "cursor": {
-                "type": "string",
-                "description": "Pagination cursor from a previous response.",
-            },
-        },
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
-
-
 # -------------------------------------------------------------------
 # ipaddress_get
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description="Get a single IP address by address or ID, with interfaces prefetched.",
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _ipaddress_get_handler(
     ctx: ToolContext,
     name_or_id: str,
@@ -294,31 +208,16 @@ async def _ipaddress_get_handler(
     return await sync_to_async(query_utils._sync_ipaddress_get, thread_sensitive=True)(user=user, name_or_id=name_or_id)
 
 
-register_mcp_tool(
-    name="ipaddress_get",
-    func=_ipaddress_get_handler,
-    description="Get a single IP address by address or ID, with interfaces prefetched.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "name_or_id": {
-                "type": "string",
-                "description": "IP address (e.g. '10.0.0.1/24') or UUID primary key.",
-            },
-        },
-        "required": ["name_or_id"],
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
-
-
 # -------------------------------------------------------------------
 # prefix_list
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description="List network prefixes with VRF, tenant, status, and role.",
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _prefix_list_handler(
     ctx: ToolContext,
     limit: int = 25,
@@ -340,35 +239,16 @@ async def _prefix_list_handler(
     )
 
 
-register_mcp_tool(
-    name="prefix_list",
-    func=_prefix_list_handler,
-    description="List network prefixes with VRF, tenant, status, and role.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "default": 25,
-                "description": "Maximum number of prefixes to return (default 25, max 1000).",
-            },
-            "cursor": {
-                "type": "string",
-                "description": "Pagination cursor from a previous response.",
-            },
-        },
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
-
-
 # -------------------------------------------------------------------
 # vlan_list
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description="List VLANs with site/group, status, and role.",
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _vlan_list_handler(
     ctx: ToolContext,
     limit: int = 25,
@@ -390,35 +270,16 @@ async def _vlan_list_handler(
     )
 
 
-register_mcp_tool(
-    name="vlan_list",
-    func=_vlan_list_handler,
-    description="List VLANs with site/group, status, and role.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "default": 25,
-                "description": "Maximum number of VLANs to return (default 25, max 1000).",
-            },
-            "cursor": {
-                "type": "string",
-                "description": "Pagination cursor from a previous response.",
-            },
-        },
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
-
-
 # -------------------------------------------------------------------
 # location_list
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description="List locations with location type, parent, and tenant.",
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _location_list_handler(
     ctx: ToolContext,
     limit: int = 25,
@@ -440,35 +301,19 @@ async def _location_list_handler(
     )
 
 
-register_mcp_tool(
-    name="location_list",
-    func=_location_list_handler,
-    description="List locations with location type, parent, and tenant.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "default": 25,
-                "description": "Maximum number of locations to return (default 25, max 1000).",
-            },
-            "cursor": {
-                "type": "string",
-                "description": "Pagination cursor from a previous response.",
-            },
-        },
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
-
-
 # -------------------------------------------------------------------
 # search_by_name
 # -------------------------------------------------------------------
 
 
+@register_tool(
+    description=(
+        "Multi-model name search across devices, interfaces, IP addresses, "
+        "VLANs, and locations. All search terms must match (AND semantics)."
+    ),
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
 async def _search_by_name_handler(
     ctx: ToolContext,
     query: str,
@@ -501,39 +346,3 @@ async def _search_by_name_handler(
     return await sync_to_async(query_utils._sync_search_by_name, thread_sensitive=True)(
         user=user, query=query, limit=limit, cursor=cursor
     )
-
-
-register_mcp_tool(
-    name="search_by_name",
-    func=_search_by_name_handler,
-    description=(
-        "Multi-model name search across devices, interfaces, IP addresses, prefixes, "
-        "VLANs, and locations. All search terms must match (AND semantics)."
-    ),
-    input_schema={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": (
-                    "Space-separated search terms. All terms must appear in the "
-                    "object's name (AND match). Case-insensitive. "
-                    "Example: 'juniper router' finds objects with both terms."
-                ),
-            },
-            "limit": {
-                "type": "integer",
-                "default": 25,
-                "description": "Maximum number of results to return (default 25, max 1000).",
-            },
-            "cursor": {
-                "type": "string",
-                "description": "Pagination cursor from a previous response.",
-            },
-        },
-        "required": ["query"],
-        "additionalProperties": False,
-    },
-    tier=TOOLS_TIER,
-    scope=TOOLS_SCOPE,
-)
