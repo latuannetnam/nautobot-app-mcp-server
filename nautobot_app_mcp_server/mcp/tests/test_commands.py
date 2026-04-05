@@ -25,9 +25,7 @@ class TestCreateApp(TestCase):
         """connection.ensure_connection() failure raises RuntimeError with descriptive message."""
         from nautobot_app_mcp_server.mcp.commands import create_app
 
-        with patch(
-            "nautobot_app_mcp_server.mcp.commands.connection.ensure_connection"
-        ) as mock_ensure:
+        with patch("nautobot_app_mcp_server.mcp.commands.connection.ensure_connection") as mock_ensure:
             mock_ensure.side_effect = Exception("connection refused")
 
             with self.assertRaises(RuntimeError) as ctx:

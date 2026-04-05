@@ -56,8 +56,7 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.HTTP_INFO(
-                f"[start_mcp_dev_server] Starting FastMCP dev server "
-                f"(host={host}, port={port}, reload=True)..."
+                f"[start_mcp_dev_server] Starting FastMCP dev server " f"(host={host}, port={port}, reload=True)..."
             )
         )
 

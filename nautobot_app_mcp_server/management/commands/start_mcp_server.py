@@ -52,11 +52,7 @@ class Command(BaseCommand):
         host = options["host"]
         port = options["port"]
 
-        self.stdout.write(
-            self.style.HTTP_INFO(
-                f"[start_mcp_server] Starting FastMCP (host={host}, port={port})..."
-            )
-        )
+        self.stdout.write(self.style.HTTP_INFO(f"[start_mcp_server] Starting FastMCP (host={host}, port={port})..."))
 
         try:
             mcp, bound_host, bound_port = create_app(host=host, port=port)
@@ -64,11 +60,7 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"[start_mcp_server] {exc}"))
             raise SystemExit(1) from exc
 
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"[start_mcp_server] FastMCP listening on {bound_host}:{bound_port}"
-            )
-        )
+        self.stdout.write(self.style.SUCCESS(f"[start_mcp_server] FastMCP listening on {bound_host}:{bound_port}"))
 
         # mcp.run() blocks forever — correct for a production server.
         # Using HTTP transport (modern, recommended over legacy SSE).
