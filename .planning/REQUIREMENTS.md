@@ -17,7 +17,7 @@ Requirements for v1.2.0 milestone — separate-process MCP server refactor (Opti
 
 ### Infrastructure
 
-- [ ] **P1-01**: `start_mcp_server.py` production management command: `nautobot.setup()` → register tools → `mcp.run(transport="sse")`; blocks forever; systemd-managed
+- [ ] **P1-01**: `start_mcp_server.py` production management command: `nautobot.setup()` → register tools → `mcp.run(transport="http")`; blocks forever; systemd-managed
 - [ ] **P1-02**: `start_mcp_dev_server.py` dev management command: `create_app()` factory + `uvicorn.run(reload=True)` with file-watch restart
 - [ ] **P1-03**: `create_app()` validates DB connectivity before FastMCP starts (query `extras_jobresult` to confirm DB is reachable)
 - [ ] **P1-04**: Read `NAUTOBOT_CONFIG` and `PLUGINS_CONFIG` from environment variables

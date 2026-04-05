@@ -15,7 +15,7 @@ Two Django management commands that serve as standalone FastMCP server entry poi
 
 ### P1-01: `start_mcp_server` Production Command
 - **D-01:** Management command name: `start_mcp_server`
-- **D-02:** Entry point flow: `nautobot.setup()` → register tools → `mcp.run(transport="sse")` (blocks forever)
+- **D-02:** Entry point flow: `nautobot.setup()` → register tools → `mcp.run(transport="http")` (blocks forever) — HTTP transport (modern, recommended), NOT legacy SSE
 - **D-03:** `nautobot.setup()` called at the **top** of the command entry point, before any relative imports — satisfies PITFALL #1 (RuntimeError: Django wasn't set up yet)
 - **D-04:** Production server binds to `0.0.0.0:8005`
 
@@ -31,7 +31,7 @@ Two Django management commands that serve as standalone FastMCP server entry poi
 - **D-10:** DB validation: `from django.db import connection; connection.ensure_connection()` — called first, before `nautobot.setup()`. Generic Django check, no Nautobot model dependency.
 - **D-11:** On DB failure: raises `RuntimeError("Database connectivity check failed: <detail>")`
 - **D-12:** After DB check: `import nautobot; nautobot.setup()` — bootstraps Django ORM for standalone process
-- **D-13:** Returns `(mcp_instance, host, port)` — FastMCP 3.x does NOT accept `host`/`port` in the constructor (breaking change in 3.x). Production: `(mcp, host, port) = create_app(...); mcp.run(transport="sse", host=host, port=port)`. Dev: `uvicorn.run(mcp.http_app(transport="sse"), host=host, port=port, reload=True, reload_dirs=[str(watch_dir)])`
+- **D-13:** Returns `(mcp_instance, host, port)` — FastMCP 3.x does NOT accept `host`/`port` in the constructor (breaking change in 3.x). Production: `(mcp, host, port) = create_app(...); mcp.run(transport="http", host=host, port=port)`. Dev: `uvicorn.run(mcp.http_app(), host=host, port=port, reload=True, reload_dirs=[str(watch_dir)])` — HTTP transport (modern) used in both cases, not legacy SSE
 
 ### P1-04: Environment Variable Configuration
 - **D-14:** `create_app()` reads `NAUTOBOT_CONFIG` from environment via `os.environ.get("NAUTOBOT_CONFIG")` — sets Django settings module before `nautobot.setup()`

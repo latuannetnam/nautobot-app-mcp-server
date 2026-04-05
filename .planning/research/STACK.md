@@ -12,7 +12,7 @@
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| `fastmcp` | `^3.2.0` (existing) | `FastMCP` server instance, `mcp.run(transport="sse")` | Already installed; provides the standalone runloop — no Django bridge needed |
+| `fastmcp` | `^3.2.0` (existing) | `FastMCP` server instance, `mcp.run(transport="http")` | Already installed; provides the standalone runloop — no Django bridge needed |
 | `uvicorn` | `>=0.35.0` (transitive via fastmcp; locked `0.42.0`) | ASGI server for dev hot-reload | FastMCP already depends on uvicorn; `start_mcp_dev_server.py` uses `uvicorn.run()` with `reload=True` and `create_app()` factory |
 | `nautobot` | `>=3.0.0,<4.0.0` (existing) | `nautobot.setup()` bootstraps Django ORM once per worker | Called once at worker startup; from then on, direct ORM access works without the WSGI→ASGI bridge |
 | `asgiref` | ships with Nautobot/FastMCP (existing) | `sync_to_async` wraps ORM calls in async tool handlers | Existing in embedded architecture; continues to be used for ORM calls inside `async def tool_handler()` |
@@ -33,11 +33,11 @@
 | Addition | Rationale | Source |
 |----------|-----------|--------|
 | `uvicorn` (`>=0.35`) explicitly listed | Required for `start_mcp_dev_server.py`; already a transitive dep via FastMCP but should be explicit for `uvicorn.run()` API | `nautobot-app-mcp` `start_mcp_dev_server.py` L79 |
-| `start_mcp_server.py` Django management command | Production entry point: `mcp.run(transport="sse")` on a configurable host/port | `nautobot-app-mcp` `start_mcp_server.py` L71 |
+| `start_mcp_server.py` Django management command | Production entry point: `mcp.run(transport="http")` on a configurable host/port | `nautobot-app-mcp` `start_mcp_server.py` L71 |
 | `start_mcp_dev_server.py` Django management command | Dev entry point: `uvicorn.run("...:create_app", reload=True)` with auto-reload watching tool dirs | `nautobot-app-mcp` `start_mcp_dev_server.py` L79 |
 | `create_app()` factory function | Standalone FastMCP app factory callable by uvicorn; calls `nautobot.setup()` + registers tools | `nautobot-app-mcp` `start_mcp_dev_server.py` L91 |
 | `nautobot.setup()` call at worker startup | Bootstraps Django ORM once per worker; from then on `sync_to_async(orm_fn)()` works without WSGI | `nautobot-app-mcp` `start_mcp_dev_server.py` L95 |
-| `mcp.run(transport="sse")` for production | FastMCP's built-in SSE transport; runs the server loop natively | `nautobot-app-mcp` `start_mcp_server.py` L71 |
+| `mcp.run(transport="http")` for production | FastMCP's built-in HTTP transport; runs the server loop natively | `nautobot-app-mcp` `start_mcp_server.py` L71 |
 
 ### REMOVED (Embedded Architecture — No Longer Needed)
 
@@ -97,7 +97,7 @@ uvicorn.run(
 
 | Environment | Transport | Server | Notes |
 |-------------|-----------|--------|-------|
-| **Production** | `mcp.run(transport="sse")` | FastMCP native loop | systemd-managed; no uvicorn |
+| **Production** | `mcp.run(transport="http")` | FastMCP native loop | systemd-managed; no uvicorn |
 | **Development** | `uvicorn.run(reload=True)` | uvicorn ASGI server | Auto-reload on file changes; `create_app()` factory |
 
 ### Version
@@ -181,7 +181,7 @@ All existing dev dependencies (`invoke`, `ruff`, `pylint`, `coverage`, etc.) rem
 |------------|-------------|------------------------|
 | `uvicorn` for dev server | `hypercorn` | Hypercorn has better Windows support and is used by some FastMCP deployments, but uvicorn is FastMCP's default and is already a transitive dep — no reason to add another server |
 | `nautobot.setup()` + `sync_to_async` ORM | REST API calls between processes | REST adds network overhead and requires API token scoping; direct ORM is zero-latency and uses the same auth token model |
-| `mcp.run(transport="sse")` production | `streamable-http` transport | `streamable-http` is more complex and requires the `StreamableHTTPSessionManager` pattern (the same complexity the refactor is trying to escape); SSE is FastMCP's recommended production transport |
+| `mcp.run(transport="http")` production | HTTP transport (modern) | HTTP transport is FastMCP's recommended production transport; bidirectional communication, more efficient than legacy SSE |
 | Django management commands as entry point | `__main__.py` standalone script | Management commands integrate with Nautobot's plugin system (`nautobot setup()`), Docker entry points, and systemd service files naturally — no reason to bypass them |
 
 ---
@@ -202,7 +202,8 @@ All existing dev dependencies (`invoke`, `ruff`, `pylint`, `coverage`, etc.) rem
 ## Stack Patterns by Variant
 
 **If production deployment:**
-- Use `start_mcp_server.py` management command with `mcp.run(transport="sse")`
+
+- Use `start_mcp_server.py` management command with `mcp.run(transport="http")`
 - Manage via systemd service (not uvicorn)
 - `nautobot.setup()` called once at worker startup
 
@@ -217,7 +218,7 @@ All existing dev dependencies (`invoke`, `ruff`, `pylint`, `coverage`, etc.) rem
 
 | Package | Version | Compatible With | Notes |
 |---------|---------|-----------------|-------|
-| `fastmcp` | `^3.2.0` (existing) | `mcp >=1.24.0,<2.0` | Already installed; `mcp.run(transport="sse")` stable |
+| `fastmcp` | `^3.2.0` (existing) | `mcp >=1.24.0,<2.0` | Already installed; `mcp.run(transport="http")` stable |
 | `uvicorn` | `>=0.35.0` (existing transitive; locked `0.42.0`) | FastMCP requires `>=0.35`; full API (`run()`, `Config`) via `uvicorn[standard]` | No change to Nautobot compatibility |
 | `nautobot` | `>=3.0.0,<4.0.0` (existing) | `nautobot.setup()` available since Nautobot 1.x; stable | `nautobot.setup()` initializes ORM without WSGI |
 | `asgiref` | ships with Nautobot/FastMCP | `sync_to_async` unchanged | Still used for ORM wrappers inside async tool handlers |
@@ -228,7 +229,7 @@ All existing dev dependencies (`invoke`, `ruff`, `pylint`, `coverage`, etc.) rem
 
 ## Sources
 
-- `nautobot-app-mcp` (`nautobot_mcp/management/commands/start_mcp_server.py`) — production management command with `mcp.run(transport="sse")` — **source-verified**
+- `nautobot-app-mcp` (`nautobot_mcp/management/commands/start_mcp_server.py`) — production management command with `mcp.run(transport="http")` — **source-verified**
 - `nautobot-app-mcp` (`nautobot_mcp/management/commands/start_mcp_dev_server.py`) — dev management command with `uvicorn.run(reload=True)` and `create_app()` factory — **source-verified**
 - `nautobot-app-mcp/pyproject.toml` — reference stack (`mcp ^1.6.0`, no explicit uvicorn, `python ^3.8`) — **source-verified**
 - `nautobot-app-mcp-server/pyproject.toml` — current dependencies (`fastmcp ^3.2.0`, `nautobot >=3.0.0,<4.0.0`) — **source-verified**

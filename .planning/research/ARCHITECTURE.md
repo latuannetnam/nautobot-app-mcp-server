@@ -54,7 +54,7 @@ This document is consumed by `gsd-roadmapper` to understand component responsibi
 │  │    nautobot.setup()  ──► bootstraps Django ORM once per worker        │    │
 │  │    FastMCP("NautobotMCP", port=8005)                                  │    │
 │  │    register_all_tools_with_mcp(mcp)  ──► registry.py decorators       │    │
-│  │    mcp.run(transport="sse")  /  mcp.sse_app() via uvicorn             │    │
+│  │    mcp.run(transport="http")  /  mcp.http_app() via uvicorn            │    │
 │  │                                                                            │
 │  │  Tool handlers (device_tools.py, etc.)                                  │    │
 │  │    @sync_to_async(thread_sensitive=True)                                │    │
@@ -82,7 +82,7 @@ Startup (one-time per worker)
        │
        ├── register_all_tools_with_mcp(mcp)  [registry.py → tool decorators]
        │
-       └── mcp.run(transport="sse")  [production]  OR  mcp.sse_app() via uvicorn  [dev]
+       └── mcp.run(transport="http")  [production]  OR  mcp.http_app() via uvicorn  [dev]
 
 Runtime (per MCP request)
 │
@@ -112,8 +112,8 @@ Runtime (per MCP request)
 
 | Component | Location | Responsibility | Implementation Pattern |
 |-----------|----------|----------------|----------------------|
-| **Management command (prod)** | `management/commands/start_mcp_server.py` | Bootstrap FastMCP worker: `nautobot.setup()` → register tools → `mcp.run(transport="sse")` | Django `BaseCommand`, reads plugin settings for host/port, `mcp.run()` blocks forever |
-| **Management command (dev)** | `management/commands/start_mcp_dev_server.py` | Dev worker with uvicorn auto-reload: `nautobot.setup()` → `create_app()` factory → `uvicorn.run(mcp.sse_app())` | Django `BaseCommand` + `create_app()` module-level factory for uvicorn reload detection |
+| **Management command (prod)** | `management/commands/start_mcp_server.py` | Bootstrap FastMCP worker: `nautobot.setup()` → register tools → `mcp.run(transport="http")` | Django `BaseCommand`, reads plugin settings for host/port, `mcp.run()` blocks forever |
+| **Management command (dev)** | `management/commands/start_mcp_dev_server.py` | Dev worker with uvicorn auto-reload: `nautobot.setup()` → `create_app()` factory → `uvicorn.run(mcp.http_app())` | Django `BaseCommand` + `create_app()` module-level factory for uvicorn reload detection |
 | **Tool registry** | `nautobot_mcp/tools/registry.py` | Register tools via `@register_tool` decorator; `discover_tools_from_directory()` for custom tools; `register_all_tools_with_mcp()` to wire all tools to FastMCP | Module-level `_tool_registry` dict; `MCPTool.objects` database persistence; `@mcp.tool()` applied during `register_all_tools_with_mcp()` |
 | **Tool implementations** | `nautobot_mcp/tools/device_tools.py` | Individual tool handlers; `sync_to_async` ORM wrappers; permission enforcement | `@register_tool` decorator + `sync_to_async` wrapper pattern; `select_related`/`prefetch_related` chains; `.restrict(user, action="view")` |
 | **Session state** | `MCPSessionState` (session_tools.py) | Per-session enabled_scopes + enabled_searches; keyed by FastMCP session ID in `StreamableHTTPSessionManager.sessions` dict | Plain Python dict, no monkey-patching of RequestContext; `_mcp_tool_state` dict on session, not on dataclass |
@@ -139,7 +139,7 @@ def create_app():
 
     mcp = FastMCP("NautobotMCP", port=8005)
     register_all_tools_with_mcp(mcp)
-    return mcp.sse_app()
+    return mcp.http_app()
 ```
 
 **What it does:** Initializes Django settings, registers all installed apps, runs migrations if needed, and prepares the ORM. After this call, `Device.objects`, `Token.objects`, etc. are fully usable from the same process.
@@ -244,7 +244,7 @@ FastMCP's `list_tools` returns the full tool manifest (all registered tools). Pr
 
 | Aspect | Production (`start_mcp_server.py`) | Development (`start_mcp_dev_server.py`) |
 |--------|-----------------------------------|----------------------------------------|
-| Transport | `mcp.run(transport="sse")` — FastMCP's built-in SSE server | `mcp.sse_app()` + `uvicorn.run()` — uvicorn with auto-reload |
+| Transport | `mcp.run(transport="http")` — FastMCP's built-in HTTP server | `mcp.http_app()` + `uvicorn.run()` — uvicorn with auto-reload |
 | Process management | `systemctl start nautobot-mcp` or Docker `command:` | `poetry run invoke start-mcp-dev` |
 | Auto-reload | No — production static binary | Yes — uvicorn `--reload` with `reload_dirs` including custom tools |
 | Host/port config | From `settings.PLUGINS_CONFIG["nautobot_mcp"]["MCP_HOST/PORT"]` | Default `127.0.0.1:8005` |
@@ -296,7 +296,7 @@ Dependencies dictate the following implementation order:
 
 | File | Action | Changes |
 |------|--------|---------|
-| `management/commands/start_mcp_server.py` | **New** | Production management command with `nautobot.setup()` + `mcp.run(transport="sse")` |
+| `management/commands/start_mcp_server.py` | **New** | Production management command with `nautobot.setup()` + `mcp.run(transport="http")` |
 | `management/commands/start_mcp_dev_server.py` | **New** | Dev management command with `create_app()` factory + uvicorn auto-reload |
 | `nautobot_mcp/tools/registry.py` | **New** | Tool registration, `discover_tools_from_directory()`, `register_all_tools_with_mcp()` |
 | `nautobot_mcp/tools/device_tools.py` | **New** | `get_device_details` with `sync_to_async` ORM wrapper (reference implementation) |
@@ -375,7 +375,7 @@ Dependencies dictate the following implementation order:
 | **Nautobot ORM** | `nautobot.setup()` at startup, then direct `from nautobot.dcim.models import Device` | Only one `nautobot.setup()` call per worker lifetime |
 | **Nautobot settings** | `from django.conf import settings` — reads `PLUGINS_CONFIG["nautobot_mcp"]` | Used for host, port, custom tools dir, core tools toggle |
 | **Nautobot token auth** | `from nautobot.users.models import Token` — `Token.objects.select_related("user").get(key=token_key)` | Token keys are 40-char hex, no prefix |
-| **FastMCP HTTP transport** | `mcp.run(transport="sse")` (prod) or `mcp.sse_app()` + uvicorn (dev) | Separate port from Nautobot (default 8005) |
+| **FastMCP HTTP transport** | `mcp.run(transport="http")` (prod) or `mcp.http_app()` + uvicorn (dev) | Separate port from Nautobot (default 8005) |
 | **Claude Code / Claude Desktop** | MCP client connects to `http://host:8005/mcp/` with `Authorization: Token <key>` | Standard MCP Streamable HTTP |
 
 ### Internal Boundaries

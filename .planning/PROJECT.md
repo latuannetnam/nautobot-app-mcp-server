@@ -84,7 +84,7 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 
 **Target features:**
 - Migrate FastMCP server from embedded (Option A) to separate-process (Option B) via Django management commands
-- `start_mcp_server.py` — production: `mcp.run(transport="sse")`, systemd-managed
+- `start_mcp_server.py` — production: `mcp.run(transport="http")`, systemd-managed
 - `start_mcp_dev_server.py` — development: uvicorn + `create_app()` factory with auto-reload
 - `nautobot.setup()` bootstraps Django ORM once per worker
 - Session state as normal dict keyed by FastMCP session ID (no monkey-patching)

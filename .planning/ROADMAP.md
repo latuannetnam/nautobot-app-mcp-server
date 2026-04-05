@@ -83,14 +83,14 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 **Success Criteria** (what must be TRUE):
 
-1. `python manage.py start_mcp_server --help` shows usage and starts `mcp.run(transport="sse")` blocking indefinitely
+1. `python manage.py start_mcp_server --help` shows usage and starts `mcp.run(transport="http")` blocking indefinitely
 2. `python manage.py start_mcp_dev_server --help` shows usage and starts `uvicorn.run(reload=True)` with auto-reload
 3. `create_app()` is a callable that returns the FastMCP ASGI app; calling it before DB is reachable raises a descriptive `RuntimeError`
 4. `create_app()` reads `NAUTOBOT_CONFIG` and `PLUGINS_CONFIG` from environment variables
 
 **Plans:** 4 plans
 
-- [ ] 08-01: `start_mcp_server.py` production management command — `nautobot.setup()` → register tools → `mcp.run(transport="sse")`
+- [ ] 08-01: `start_mcp_server.py` production management command — `nautobot.setup()` → register tools → `mcp.run(transport="http")`
 - [ ] 08-02: `start_mcp_dev_server.py` dev management command — `create_app()` factory + `uvicorn.run(reload=True)`
 - [ ] 08-03: `create_app()` validates DB connectivity before FastMCP starts
 - [ ] 08-04: Read `NAUTOBOT_CONFIG` and `PLUGINS_CONFIG` from environment in `create_app()`
@@ -312,7 +312,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 **Stack (v1.2.0):**
 
-- `fastmcp ^3.2.0` — standalone event loop, `mcp.run(transport="sse")`
+- `fastmcp ^3.2.0` — standalone event loop, `mcp.run(transport="http")` (HTTP transport, not legacy SSE)
 - `uvicorn >= 0.35.0` — dev server with `reload=True`
 - `nautobot.setup()` — bootstraps Django ORM once per worker
 - `asgiref` — `sync_to_async(thread_sensitive=True)` for ORM calls

@@ -47,7 +47,7 @@ Write `nautobot_app_mcp_server/management/commands/start_mcp_server.py`:
 """Django management command: start_mcp_server.
 
 Production entry point for the standalone FastMCP server. Bootstrap Django via
-nautobot.setup(), then run the FastMCP SSE server indefinitely.
+nautobot.setup(), then run the FastMCP HTTP server indefinitely.
 
 Usage:
     poetry run nautobot-server start_mcp_server
@@ -117,7 +117,8 @@ class Command(BaseCommand):
         )
 
         # mcp.run() blocks forever — correct for a production server.
-        mcp.run(transport="sse", host=bound_host, port=bound_port)
+        # Using HTTP transport (modern, recommended over legacy SSE).
+        mcp.run(transport="http", host=bound_host, port=bound_port)
 ```
 
 **Key decisions:**
@@ -136,7 +137,7 @@ class Command(BaseCommand):
 - `os.environ["DJANGO_SETTINGS_MODULE"] = NAUTOBOT_CONFIG` before `nautobot.setup()`
 - `from nautobot_app_mcp_server.mcp.commands import create_app` after `nautobot.setup()`
 - `add_arguments(parser)` defines `--host` (str, default "0.0.0.0") and `--port` (int, default 8005)
-- `mcp.run(transport="sse", host=bound_host, port=bound_port)` in `handle()`
+- `mcp.run(transport="http", host=bound_host, port=bound_port)` in `handle()`
 - `RuntimeError` from `create_app()` caught, exits `SystemExit(1)`
 - `help = "Start the standalone FastMCP server (production mode). Blocks indefinitely."`
 - Ruff clean: `poetry run ruff check nautobot_app_mcp_server/management/commands/start_mcp_server.py`
@@ -158,7 +159,7 @@ class Command(BaseCommand):
 - `nautobot.setup()` before any relative imports
 - `NAUTOBOT_CONFIG` from environment, default `"nautobot_config"`
 - `create_app(host, port)` called, `RuntimeError` exits cleanly
-- `mcp.run(transport="sse", host, port)` — blocks forever
+- `mcp.run(transport="http", host, port)` — blocks forever (HTTP transport, modern recommended approach)
 - `--host`/`--port` defaults 0.0.0.0 / 8005
 - Pylint 10.00, Ruff clean
 
@@ -260,8 +261,8 @@ class Command(BaseCommand):
             )
         )
 
-        # mcp.http_app(transport="sse") returns a StarletteWithLifespan ASGI callable.
-        mcp_app = mcp.http_app(transport="sse")
+        # mcp.http_app() returns a StarletteWithLifespan ASGI callable (HTTP is the default).
+        mcp_app = mcp.http_app()
 
         # reload_dirs scoped to nautobot_app_mcp_server/ only (D-08).
         package_root = Path(__file__).resolve().parents[3] / "nautobot_app_mcp_server"
@@ -280,7 +281,7 @@ class Command(BaseCommand):
 
 - Same two-phase import pattern as `start_mcp_server` — `nautobot.setup()` before any relative imports.
 - Default host `127.0.0.1` (localhost only, not externally exposed) per D-07.
-- `mcp.http_app(transport="sse")` passed to `uvicorn.run()` (NOT `mcp.run()`) per D-06.
+- `mcp.http_app()` passed to `uvicorn.run()` (NOT `mcp.run()`) per D-06 — HTTP is the default transport.
 - `reload_dirs=[str(package_root)]` scoped to `nautobot_app_mcp_server/` per D-08.
 - `package_root = Path(__file__).resolve().parents[3] / "nautobot_app_mcp_server"` — reliable across environments.
 
@@ -292,7 +293,7 @@ class Command(BaseCommand):
 - `os.environ["DJANGO_SETTINGS_MODULE"] = NAUTOBOT_CONFIG` before `nautobot.setup()`
 - `from nautobot_app_mcp_server.mcp.commands import create_app` after `nautobot.setup()`
 - `add_arguments(parser)` defines `--host` (str, default "127.0.0.1") and `--port` (int, default 8005)
-- `mcp_app = mcp.http_app(transport="sse")` present
+- `mcp_app = mcp.http_app()` present
 - `uvicorn.run(mcp_app, ..., reload=True, reload_dirs=[...])` present
 - `reload_dirs` contains path string with `nautobot_app_mcp_server` (NOT project root)
 - `host="127.0.0.1"` in uvicorn.run() call
@@ -318,7 +319,7 @@ class Command(BaseCommand):
 - `nautobot.setup()` before any relative imports
 - `NAUTOBOT_CONFIG` from environment, default `"nautobot_config"`
 - `create_app(host, port)` called, `RuntimeError` exits cleanly
-- `mcp.http_app(transport="sse")` passed to `uvicorn.run()`
+- `mcp.http_app()` passed to `uvicorn.run()` (HTTP is default transport)
 - `reload_dirs` scoped to `nautobot_app_mcp_server/` only
 - `--host`/`--port` defaults 127.0.0.1 / 8005
 - Pylint 10.00, Ruff clean
@@ -351,7 +352,7 @@ Write `nautobot_app_mcp_server/mcp/commands.py`:
 
 Phase 8 infrastructure — standalone FastMCP process entry point.
 This module is imported by both management commands:
-  - start_mcp_server.py   → mcp.run(transport="sse", host, port)     (production)
+  - start_mcp_server.py   → mcp.run(transport="http", host, port)   (production)
   - start_mcp_dev_server.py → uvicorn.run(mcp.http_app(...), ...)    (development)
 
 Phase 9 wires register_all_tools_with_mcp() into this module.

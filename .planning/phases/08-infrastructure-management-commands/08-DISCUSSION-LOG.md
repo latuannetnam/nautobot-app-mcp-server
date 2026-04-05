@@ -31,7 +31,7 @@
 | Accept config path, return just the ASGI callable | Simpler but less flexible | |
 
 **User's choice:** Accept host/port, return FastMCP instance (recommended default)
-**Notes:** `create_app(host, port)` → returns FastMCP instance. Production: `mcp.run(transport="sse")` (blocks forever). Dev: `uvicorn.run(mcp.http_app, host, port, reload=True)`. `nautobot.setup()` called before any model imports (satisfies known pitfall PITFALL #1). DB validation via `connection.ensure_connection()` called first.
+**Notes:** `create_app(host, port)` → returns FastMCP instance. Production: `mcp.run(transport="http")` (blocks forever). Dev: `uvicorn.run(mcp.http_app(), host, port, reload=True)`. `nautobot.setup()` called before any model imports (satisfies known pitfall PITFALL #1). DB validation via `connection.ensure_connection()` called first.
 
 ---
 
