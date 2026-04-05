@@ -148,6 +148,13 @@ convention = "google"
 "nautobot_app_mcp_server/mcp/tests/*" = [
     "D",
 ]
+"nautobot_app_mcp_server/management/commands/*" = [
+    "D",  # Docstrings not required for management command methods
+    "S104",  # S104 (binding to all interfaces) is expected for --host 0.0.0.0
+]
+"nautobot_app_mcp_server/mcp/commands.py" = [
+    "S104",  # Host defaults to 0.0.0.0 for production; callers override as needed
+]
 
 [tool.coverage.run]
 disable_warnings = ["already-imported"]
