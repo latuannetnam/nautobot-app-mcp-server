@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: Milestone Goal
 status: executing
-last_updated: "2026-04-05T12:48:30.334Z"
+last_updated: "2026-04-05T13:00:00.000Z"
 last_activity: 2026-04-05
 progress:
-  total_phases: 6
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 7
+  total_phases: 7
+  completed_phases: 3
+  total_plans: 13
+  completed_plans: 13
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-05 (Phase 09-06 complete)
+**Last updated:** 2026-04-05 (Phase 09 complete — Phase 10 next)
 
 ---
 
@@ -25,20 +25,29 @@ Plan: Not started
 Status: Executing
 Last activity: 2026-04-05
 
-Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Phase 9 executing (5/6 plans)
+Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–9 complete (13/13 plans); Phase 10 not started
+
+---
+
+## Phase 09 Summaries (Tool Registration Refactor — Complete)
 
 **Phase 09-01 completed** (`09-01-SUMMARY.md`):
 
 - `schema.py`: `func_signature_to_input_schema()` auto-derives JSON Schema from Python type hints
 - `@register_tool` decorator in `mcp/__init__.py`: ergonomic wrapper with auto-schema
 - All 10 core tools in `core.py` converted to `@register_tool` (net: 54 insertions, 245 deletions)
-- All 80 MCP tests pass
+- All tests pass
 
 **Phase 09-02 completed** (`09-PLAN-02-SUMMARY.md`):
 
 - `register_all_tools_with_mcp(mcp)` in `mcp/__init__.py`: iterates `MCPToolRegistry.get_all()` and calls `mcp.tool(func, name, description)` for each tool; added to `__all__`
 - `mcp/commands.py` STEP 4: replaced placeholder with real wiring — import `core` (side-effect registration) then call `register_all_tools_with_mcp(mcp)`
-- 79/80 MCP tests pass; 1 pre-existing failure in `test_signal_integration.py`
+
+**Phase 09-03 completed** (`09-03-SUMMARY.md`):
+
+- `ready()` in `__init__.py`: removed `post_migrate` signal wiring, replaced with `tool_registry.json` generation
+- JSON written to package dir via `os.path.dirname(__file__)` (works for editable install and installed package)
+- `grep "post_migrate" __init__.py` → no matches (confirmed removed)
 
 **Phase 09-04 completed** (`09-PLAN-04-SUMMARY.md`):
 
@@ -46,14 +55,21 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 - `grep -c "^async def _"` returns 10
 - `grep -c "sync_to_async(query_utils._sync_"` returns 10
 - No module-level Django model imports in `core.py`
-- `ToolContext` imported from `fastmcp.server.context`
+
+**Phase 09-05 completed** (`09-PLAN-05-SUMMARY.md`):
+
+- `query_utils.py`: moved all Nautobot model imports from module level to `TYPE_CHECKING` block
+- Added 22 lazy imports inside functions (≥20 required); zero module-level violations
 
 **Phase 09-06 completed** (`09-PLAN-06-SUMMARY.md`):
 
 - 11 unit tests in `test_register_tool.py` covering `func_signature_to_input_schema()` (3), `@register_tool` decorator (5), and `register_all_tools_with_mcp()` (3)
-- Adapted from pytest to `django.test.TestCase` (no pytest dependency in project)
-- All 91 MCP tests pass (1 pre-existing failure in `test_signal_integration.py` unrelated to Phase 09)
-- ruff clean, pylint F0002 astroid crash is environment bug (astroid 2.15.8 vs 3.x), not code issue
+- All 89 MCP tests pass (PostMigrateSignalTestCase removed as stale)
+
+**Gap fixes after verification:**
+
+- `commands.py` STEP 4a: reads `tool_registry.json` at startup, logs discovery count, graceful no-op when absent (commit `24635c1`)
+- `PostMigrateSignalTestCase` deleted from `test_signal_integration.py` — `post_migrate` replaced by `ready()` writing JSON (commit `24635c1`)
 
 ---
 
@@ -72,6 +88,14 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 - `create_app()` returns `(FastMCP, host, port)` tuple
 - `reload_dirs` scoped to `nautobot_app_mcp_server/` package root (computed via `Path(__file__).resolve().parents[3]`)
 - `connection.ensure_connection()` before `nautobot.setup()` for fast DB failure detection
+
+**Phase 09 decisions to carry forward:**
+
+- `@register_tool` decorator: dual registration (in-memory `MCPToolRegistry` + FastMCP via `register_all_tools_with_mcp()`)
+- `tool_registry.json`: written by plugin `ready()`, read by `commands.py` `create_app()` at startup
+- All 10 core tools: `async def` + `sync_to_async(thread_sensitive=True)` (ORM lazy imports inside functions)
+- `post_migrate` signal removed — Phase 8 MCP server process doesn't fire it; `ready()` writing JSON is the replacement
+- `func_signature_to_input_schema()`: auto-derives JSON Schema from Python type hints; FastMCP 3.x ignores `input_schema` (auto-derives from type hints at runtime)
 
 **Reference project (`nautobot-app-mcp`):**
 
@@ -92,7 +116,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 |---|---|---|---|---|---|
 | Phase 7 | Setup | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 8 | Infrastructure | Complete | 2026-04-05 | 2026-04-05 | None |
-| Phase 9 | Tool Registration | In Progress | 2026-04-05 | — | Phase 8 |
+| Phase 9 | Tool Registration | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 10 | Session State | Not Started | — | — | Phase 9 |
 | Phase 11 | Auth Refactor | Not Started | — | — | Phase 10 |
 | Phase 12 | Bridge Cleanup | Not Started | — | — | Phase 11 |
@@ -107,7 +131,8 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 | 0.1.0 | 2026-04-01 | Phases 0–4 | v1.0 shipped |
 | 0.1.0 | 2026-04-04 | Phases 5–6 | v1.1.0 shipped |
 | 0.1.0 | 2026-04-05 | Phase 7 | v1.2.0 Phase 7 setup complete |
-| 0.1.0 | 2026-04-05 | Phase 8 | v1.2.0 Phase 8 infrastructure complete (`9215257`) |
+| 0.1.0 | 2026-04-05 | Phase 8 | v1.2.0 Phase 8 infrastructure complete |
+| 0.1.0 | 2026-04-05 | Phase 9 | v1.2.0 Phase 9 tool registration refactor complete (`8da04f1`) |
 
 ---
 
