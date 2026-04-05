@@ -62,7 +62,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 - [x] 07-01: Add `uvicorn >= 0.35.0` explicit dependency to `pyproject.toml`
 - [x] 07-02: Update `development/docker-compose.yml` — pass `NAUTOBOT_DB_*` env vars to MCP server service
-- [ ] 07-03: Document `--workers 1` requirement in `docs/admin/upgrade.md`
+- [x] 07-03: Document `--workers 1` requirement in `docs/admin/upgrade.md`
 
 **Known pitfalls:**
 
