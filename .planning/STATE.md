@@ -3,29 +3,29 @@ gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: Milestone Goal
 status: executing
-last_updated: "2026-04-05T04:14:41.747Z"
-last_activity: 2026-04-05 -- Phase 08 execution started
+last_updated: "2026-04-05T04:30:30.408Z"
+last_activity: 2026-04-05 -- Phase 08 plan 08 completed (08-01/08-02/08-03/08-04 all done)
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 1
-  completed_plans: 0
+  completed_plans: 1
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-05 (v1.2.0 roadmap created — Phases 7–13)
+**Last updated:** 2026-04-05 (Phase 08 complete — Phase 09 next)
 
 ---
 
 ## Current Position
 
-Phase: 08 (infrastructure-management-commands) — EXECUTING
-Plan: 1 of 1
-Status: Executing Phase 08
-Last activity: 2026-04-05 -- Phase 08 execution started
+Phase: 08 (infrastructure-management-commands) — COMPLETE
+Plan: 1 of 1 (all 4 sub-plans: 08-01, 08-02, 08-03, 08-04)
+Status: Phase complete, ready for Phase 09
+Last activity: 2026-04-05 -- Phase 08 committed (`9215257`)
 
-Progress: [▓▓▓░░░░░░░░░] Phase 8 context done (3/13)
+Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans)
 
 ---
 
@@ -36,6 +36,14 @@ Progress: [▓▓▓░░░░░░░░░] Phase 8 context done (3/13)
 **v1.1.0 completed (Phases 5–6):** Embedded FastMCP bridge refactor — `async_to_sync` + `session_manager.run()` replaces `asyncio.run()`; session state on `RequestContext._mcp_tool_state`; auth caching on `_cached_user`; progressive disclosure via `mcp._list_tools_mcp` override.
 
 **v1.2.0 active (Phases 7–13):** Separate-process migration (Option A → Option B).
+
+**Phase 08 decisions to carry forward:**
+
+- FastMCP 3.x: `stateless_http` passed at `mcp.run()` / `mcp.http_app()` — NOT constructor
+- Two-phase import pattern: `nautobot.setup()` before relative imports
+- `create_app()` returns `(FastMCP, host, port)` tuple
+- `reload_dirs` scoped to `nautobot_app_mcp_server/` package root (computed via `Path(__file__).resolve().parents[3]`)
+- `connection.ensure_connection()` before `nautobot.setup()` for fast DB failure detection
 
 **Reference project (`nautobot-app-mcp`):**
 
@@ -55,7 +63,7 @@ Progress: [▓▓▓░░░░░░░░░] Phase 8 context done (3/13)
 | Phase | Name | Status | Start Date | End Date | Blockers |
 |---|---|---|---|---|---|
 | Phase 7 | Setup | Complete | 2026-04-05 | 2026-04-05 | None |
-| Phase 8 | Infrastructure | Planned | 2026-04-05 | — | Phase 7 |
+| Phase 8 | Infrastructure | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 9 | Tool Registration | Not Started | — | — | Phase 8 |
 | Phase 10 | Session State | Not Started | — | — | Phase 9 |
 | Phase 11 | Auth Refactor | Not Started | — | — | Phase 10 |
@@ -70,7 +78,8 @@ Progress: [▓▓▓░░░░░░░░░] Phase 8 context done (3/13)
 |---|---|---|---|
 | 0.1.0 | 2026-04-01 | Phases 0–4 | v1.0 shipped |
 | 0.1.0 | 2026-04-04 | Phases 5–6 | v1.1.0 shipped |
-| 0.1.0 | 2026-04-05 | Phase 7–13 | v1.2.0 roadmap created |
+| 0.1.0 | 2026-04-05 | Phase 7 | v1.2.0 Phase 7 setup complete |
+| 0.1.0 | 2026-04-05 | Phase 8 | v1.2.0 Phase 8 infrastructure complete (`9215257`) |
 
 ---
 

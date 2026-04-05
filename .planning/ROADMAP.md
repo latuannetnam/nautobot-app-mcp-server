@@ -271,22 +271,22 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 ## Progress
 
-| Phase | Milestone | Plans Complete | Status | Completed |
+| # | Phase | Milestone | Plans | Status | Completed |
 | ----- | --------- | -------------- | ------ | --------- |
-| 0. Project Setup | v1.0 | 4/4 | Complete | 2026-04-01 |
-| 1. MCP Server Infrastructure | v1.0 | 11/11 | Complete | 2026-04-01 |
-| 2. Auth & Sessions | v1.0 | 7/7 | Complete | 2026-04-01 |
-| 3. Core Read Tools | v1.0 | 3/3 | Complete | 2026-04-02 |
-| 4. SKILL.md Package | v1.0 | 3/3 | Complete | 2026-04-02 |
-| 5. MCP Server Refactor | v1.1.0 | 7/7 | Complete | 2026-04-04 |
-| 6. UAT & Smoke Tests | v1.1.0 | 1/1 | Complete | 2026-04-04 |
-| 7. Setup | v1.2.0 | 1/3 | In Progress | 2026-04-05 |
-| 8. Infrastructure | v1.2.0 | 0/4 | Not started | — |
-| 9. Tool Registration | v1.2.0 | 0/6 | Not started | — |
-| 10. Session State | v1.2.0 | 0/4 | Not started | — |
-| 11. Auth Refactor | v1.2.0 | 0/4 | Not started | — |
-| 12. Bridge Cleanup | v1.2.0 | 0/6 | Not started | — |
-| 13. UAT & Validation | v1.2.0 | 0/5 | Not started | — |
+| 0 | Project Setup | v1.0 | 4/4 | Complete | 2026-04-01 |
+| 1 | MCP Server Infrastructure | v1.0 | 11/11 | Complete | 2026-04-01 |
+| 2 | Auth & Sessions | v1.0 | 7/7 | Complete | 2026-04-01 |
+| 3 | Core Read Tools | v1.0 | 3/3 | Complete | 2026-04-02 |
+| 4 | SKILL.md Package | v1.0 | 3/3 | Complete | 2026-04-02 |
+| 5 | MCP Server Refactor | v1.1.0 | 7/7 | Complete | 2026-04-04 |
+| 6 | UAT & Smoke Tests | v1.1.0 | 1/1 | Complete | 2026-04-04 |
+| 7 | Setup | v1.2.0 | 1/3 | Complete | 2026-04-05 |
+| 8 | Infrastructure | v1.2.0 | 4/4 | Complete | 2026-04-05 |
+| 9 | Tool Registration | v1.2.0 | 0/6 | Not started | — |
+| 10 | Session State | v1.2.0 | 0/4 | Not started | — |
+| 11 | Auth Refactor | v1.2.0 | 0/4 | Not started | — |
+| 12 | Bridge Cleanup | v1.2.0 | 0/6 | Not started | — |
+| 13 | UAT & Validation | v1.2.0 | 0/5 | Not started | — |
 
 ---
 
