@@ -103,4 +103,9 @@ def create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple:
 
     register_all_tools_with_mcp(mcp)
 
+    # STEP 4c: Wire scope guard middleware for session scope enforcement (Phase 10)
+    from nautobot_app_mcp_server.mcp.middleware import ScopeGuardMiddleware
+
+    mcp.add_middleware(ScopeGuardMiddleware())
+
     return (mcp, host, port)
