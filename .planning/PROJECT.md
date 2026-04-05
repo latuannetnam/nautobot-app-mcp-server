@@ -28,6 +28,8 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 - [ ] Session state per Mcp-Session-Id via FastMCP StreamableHTTPSessionManager
 - [x] `nautobot-mcp-skill` SKILL.md package with tool reference and workflows *(Phase 04)*
 - [ ] All code exercised by unit tests (full coverage of MCP behavior)
+- [x] `@register_tool` decorator — auto-generates JSON Schema from Python type hints; dual registration (in-memory `MCPToolRegistry` + FastMCP via `register_all_tools_with_mcp()`) *(Phase 09)*
+- [x] `tool_registry.json` — cross-process discovery; written by plugin `ready()`, read by MCP server `create_app()` at startup *(Phase 09)*
 
 ### Out of Scope
 
@@ -68,7 +70,7 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 |----------|-----------|---------|
 | FastMCP ASGI app embedded in Django | Zero network overhead, direct ORM access, embedded in Nautobot process | — Pending |
 | `stateless_http=False` with Mcp-Session-Id | Per-conversation scope state works across all MCP clients | — Pending |
-| `post_migrate` signal for tool registration | Fires after all apps' ready() hooks — guarantees MCP server tools registered before third-party apps call `register_mcp_tool()` | — Pending |
+| `post_migrate` signal for tool registration | Fires after all apps' ready() hooks — guarantees MCP server tools registered before third-party apps call `register_mcp_tool()` | ⚠️ Superseded — Phase 09 replaced with `ready()` writing `tool_registry.json` |
 | Cursor-based pagination (base64 PK) | Stable across concurrent writes, memory-safe, avoids offset instability | ✅ Implemented Phase 03 |
 | Progressive disclosure (Core + Per-model tiers) | Avoids tool explosion in Claude context; session state controls visibility | — Pending |
 | `select_related`/`prefetch_related` chains per tool | Memory optimization, follows netnam-cms-core patterns | — Pending |
@@ -111,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-*Last updated: 2026-04-05 after Phase 08 (Infrastructure Management Commands) complete — Phase 09 (Tool Registration) next*
+*Last updated: 2026-04-05 after Phase 09 (Tool Registration) complete — Phase 10 (Session State Simplification) next*
