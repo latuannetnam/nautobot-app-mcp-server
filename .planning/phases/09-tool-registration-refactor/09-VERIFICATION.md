@@ -127,7 +127,12 @@ register_all_tools_with_mcp(mcp)
 
 ## Criterion 3 — Plugin `ready()` Generates `tool_registry.json`; MCP Server Reads It
 
-**Status: gaps_found**
+**Status: passed**
+
+> **Gap closure (2026-04-05):** `commands.py` STEP 4a now reads `tool_registry.json`
+> at startup and logs discovery count (graceful no-op when absent). `PostMigrateSignalTestCase`
+> removed — `post_migrate` intentionally replaced by `ready()` writing JSON.
+> Commit `24635c1`. All 89 tests pass.
 
 ### What was checked
 
