@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: Milestone Goal
 status: executing
-last_updated: "2026-04-05T21:00:00.000Z"
+last_updated: "2026-04-05T21:20:00.000Z"
 last_activity: 2026-04-05
 progress:
   total_phases: 7
@@ -14,7 +14,7 @@ progress:
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-05 (Phase 10 complete — Phase 11 next)
+**Last updated:** 2026-04-05 (Phase 11 context gathered)
 
 ---
 
@@ -22,10 +22,23 @@ progress:
 
 Phase: 11
 Plan: Not started
-Status: Not started
+Status: Context gathered
 Last activity: 2026-04-05
 
-Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans); Phase 11 not started
+Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans); Phase 11 context gathered
+
+---
+
+## Phase 11 Summary (Auth Refactor — Context Gathered)
+
+**Phase 11 context captured** (`11-CONTEXT.md`):
+
+- `get_user_from_request()` refactors to `async def`; token source unchanged (`ctx.request_context.request.headers.get("Authorization")` — Starlette ASGI Request in Option B)
+- User cache: `ctx.set_state("mcp:cached_user")` / `ctx.get_state("mcp:cached_user")` — Phase 10 session state API. Cached value: user ID string (not user object). Per-FastMCP-session scope (1 DB lookup per MCP session vs per request batch). `_cached_user` attribute removed.
+- `.restrict(user, "view")` on all querysets: preserved unchanged
+- `docs/admin/upgrade.md`: add nginx `proxy_set_header Authorization $http_authorization;` directive
+
+**Key decision:** Chose `ctx.set_state`/`ctx.get_state` (Phase 10 session state API) over `ctx.request_context.session["cached_user"]` (ROADMAP wording) because `ServerSession` has no dict interface (Phase 10 finding).
 
 ---
 
@@ -129,7 +142,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans);
 | Phase 8 | Infrastructure | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 9 | Tool Registration | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 10 | Session State | Complete | 2026-04-05 | 2026-04-05 | None |
-| Phase 11 | Auth Refactor | Not Started | — | — | Phase 10 |
+| Phase 11 | Auth Refactor | Context gathered | 2026-04-05 | — | Phase 10 |
 | Phase 12 | Bridge Cleanup | Not Started | — | — | Phase 11 |
 | Phase 13 | UAT & Validation | Not Started | — | — | Phase 12 |
 
