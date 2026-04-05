@@ -141,7 +141,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 ### Phase 10: Session State Simplification
 
-**Goal:** Replace `RequestContext._mcp_tool_state` monkey-patch with FastMCP's native `ctx.request_context.session` dict. Replace `mcp._list_tools_mcp` override with `@scope_guard` decorator.
+**Goal:** Replace `RequestContext._mcp_tool_state` monkey-patch with FastMCP's native `ctx.set_state()`/`ctx.get_state()` MemoryStore API. Replace `mcp._list_tools_mcp` override with `ScopeGuardMiddleware` via FastMCP's public middleware API.
 
 **Depends on:** Phase 9
 
@@ -149,22 +149,23 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 **Success Criteria** (what must be TRUE):
 
-1. Session state is stored in `ctx.request_context.session` (plain dict, no monkey-patching)
-2. `MCPSessionState` is keyed by FastMCP `session_id` in `StreamableHTTPSessionManager.sessions`
-3. `@scope_guard("dcim")` decorator replaces `mcp._list_tools_mcp` override — scope checked before tool executes
-4. `mcp_enable_tools`, `mcp_disable_tools`, `mcp_list_tools` implemented in Option B pattern using `ctx.request_context.session`
+1. Session state is stored in `ctx.get_state()`/`ctx.set_state()` via FastMCP's `MemoryStore` (no monkey-patching)
+2. State keys `"mcp:enabled_scopes"` and `"mcp:enabled_searches"` are used; `session_id` prefix auto-managed by FastMCP
+3. `ScopeGuardMiddleware` (FastMCP `Middleware` subclass) replaces `mcp._list_tools_mcp` override for runtime enforcement
+4. `mcp_enable_tools`, `mcp_disable_tools`, `mcp_list_tools` implemented using `ToolScopeState` + `@register_tool` decorator
 
 **Plans:** 4 plans
 
-- [ ] 10-01: Session state in `ctx.request_context.session` — rewrite `session_tools.py`
-- [ ] 10-02: `MCPSessionState` keyed by FastMCP `session_id` in `StreamableHTTPSessionManager.sessions`
-- [ ] 10-03: `@scope_guard` decorator replaces `mcp._list_tools_mcp` override
-- [ ] 10-04: `mcp_enable_tools`, `mcp_disable_tools`, `mcp_list_tools` in Option B pattern
+- [x] 10-01: Session state via `ctx.get_state()`/`ctx.set_state()` — rewrite `session_tools.py`
+- [x] 10-02: `MemoryStore` keys `"mcp:enabled_scopes"` / `"mcp:enabled_searches"` — FastMCP auto-prefixes by `session_id`
+- [x] 10-03: `ScopeGuardMiddleware` via FastMCP `Middleware.on_call_tool()` hook
+- [x] 10-04: `mcp_enable_tools`, `mcp_disable_tools`, `mcp_list_tools` in Option B pattern
 
 **Known pitfalls:**
 
-- PITFALL #4: `RequestContext` monkey-patching is broken in standalone FastMCP. `ctx.request_context.session` is always a plain dict — always dict-like, always available
-- `StreamableHTTPSessionManager.sessions` is a `dict[str, ServerSession]` — `MCPSessionState` can be stored as `sessions[session_id]._mcp_tool_state` or directly on `session` if exposed
+- PITFALL #4 (corrected): `ctx.request_context.session` is NOT a plain dict — it is `ServerSession` (no `__getitem__`/`__setitem__`/`get`). `MemoryStore` via `ctx.set_state()`/`ctx.get_state()` is the correct FastMCP-native approach.
+- `MCPSessionState` from Phase 5 only worked in tests due to `MagicMock` forwarding. `ServerSession` has no dict interface. `ToolScopeState` + `MemoryStore` replaces it in production.
+- `ScopeGuardMiddleware` coexists with Phase 5's `mcp._list_tools_mcp` override during Phases 10–11; Phase 12 removes the override.
 
 **Phase exit gate:** `poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests` passes; session tools respond correctly with native session dict
 
@@ -283,7 +284,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 | 7 | Setup | v1.2.0 | 3/3 | Complete | 2026-04-05 |
 | 8 | Infrastructure | v1.2.0 | 4/4 | Complete | 2026-04-05 |
 | 9 | Tool Registration | v1.2.0 | 6/6 | Complete | 2026-04-05 |
-| 10 | Session State | v1.2.0 | 0/4 | Not started | — |
+| 10 | Session State | v1.2.0 | 4/4 | Complete | 2026-04-05 |
 | 11 | Auth Refactor | v1.2.0 | 0/4 | Not started | — |
 | 12 | Bridge Cleanup | v1.2.0 | 0/6 | Not started | — |
 | 13 | UAT & Validation | v1.2.0 | 0/5 | Not started | — |

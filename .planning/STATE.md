@@ -3,31 +3,42 @@ gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: Milestone Goal
 status: executing
-last_updated: "2026-04-05T13:00:00.000Z"
+last_updated: "2026-04-05T21:00:00.000Z"
 last_activity: 2026-04-05
 progress:
   total_phases: 7
-  completed_phases: 3
-  total_plans: 13
-  completed_plans: 13
+  completed_phases: 4
+  total_plans: 17
+  completed_plans: 17
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-05 (Phase 09 complete — Phase 10 next)
+**Last updated:** 2026-04-05 (Phase 10 complete — Phase 11 next)
 
 ---
 
 ## Current Position
 
-Phase: 10
+Phase: 11
 Plan: Not started
-Status: Executing
+Status: Not started
 Last activity: 2026-04-05
 
-Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–9 complete (13/13 plans); Phase 10 not started
+Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans); Phase 11 not started
 
 ---
+
+## Phase 10 Summaries (Session State Simplification — Complete)
+
+**Phase 10-01–04 completed** (commit `55e4694`):
+
+- `session_tools.py`: replaced `RequestContext._mcp_tool_state` monkey-patch with `ctx.get_state()`/`ctx.set_state()` via FastMCP's `MemoryStore`. Deleted `MCPSessionState`; added `ToolScopeState` dataclass with async helpers. State keys: `"mcp:enabled_scopes"` and `"mcp:enabled_searches"`.
+- `mcp/middleware.py` (new): `ScopeGuardMiddleware` — FastMCP `Middleware` subclass with `on_call_tool()` hook. Enforces scope at tool-call time as security backstop. Core tools always pass; app-tier tools require matching scope.
+- `commands.py`: wired `mcp.add_middleware(ScopeGuardMiddleware())` after tool registration.
+- `_list_tools_handler`: updated to read `enabled_scopes`/`enabled_searches` via `ctx.get_state()` directly.
+- All session tool registrations migrated to `@register_tool(name="mcp_*")` with explicit names.
+- All 96 MCP tests pass.
 
 ## Phase 09 Summaries (Tool Registration Refactor — Complete)
 
@@ -117,7 +128,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–9 complete (13/13 plans); 
 | Phase 7 | Setup | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 8 | Infrastructure | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 9 | Tool Registration | Complete | 2026-04-05 | 2026-04-05 | None |
-| Phase 10 | Session State | Not Started | — | — | Phase 9 |
+| Phase 10 | Session State | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 11 | Auth Refactor | Not Started | — | — | Phase 10 |
 | Phase 12 | Bridge Cleanup | Not Started | — | — | Phase 11 |
 | Phase 13 | UAT & Validation | Not Started | — | — | Phase 12 |
@@ -133,6 +144,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–9 complete (13/13 plans); 
 | 0.1.0 | 2026-04-05 | Phase 7 | v1.2.0 Phase 7 setup complete |
 | 0.1.0 | 2026-04-05 | Phase 8 | v1.2.0 Phase 8 infrastructure complete |
 | 0.1.0 | 2026-04-05 | Phase 9 | v1.2.0 Phase 9 tool registration refactor complete (`8da04f1`) |
+| 0.1.0 | 2026-04-05 | Phase 10 | v1.2.0 Phase 10 session state simplification complete (`55e4694`) |
 
 ---
 
