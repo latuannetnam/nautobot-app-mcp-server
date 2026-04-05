@@ -282,7 +282,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 | 6 | UAT & Smoke Tests | v1.1.0 | 1/1 | Complete | 2026-04-04 |
 | 7 | Setup | v1.2.0 | 1/3 | Complete | 2026-04-05 |
 | 8 | Infrastructure | v1.2.0 | 4/4 | Complete | 2026-04-05 |
-| 9 | Tool Registration | v1.2.0 | 0/6 | Not started | — |
+| 9 | Tool Registration | v1.2.0 | 1/6 | In Progress | — |
 | 10 | Session State | v1.2.0 | 0/4 | Not started | — |
 | 11 | Auth Refactor | v1.2.0 | 0/4 | Not started | — |
 | 12 | Bridge Cleanup | v1.2.0 | 0/6 | Not started | — |

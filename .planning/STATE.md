@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: Milestone Goal
-status: completed
-last_updated: "2026-04-05T04:57:18.815Z"
+status: executing
+last_updated: "2026-04-05T11:12:41.573Z"
 last_activity: 2026-04-05
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 1
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State — `nautobot-app-mcp-server`
@@ -20,12 +20,19 @@ progress:
 
 ## Current Position
 
-Phase: 9
-Plan: Not started
-Status: Phase complete, ready for Phase 09
+Phase: 09 (tool-registration-refactor) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
 Last activity: 2026-04-05
 
-Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans)
+Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Phase 9 executing (1/6 plans)
+
+**Phase 09-01 completed** (`09-01-SUMMARY.md`):
+
+- `schema.py`: `func_signature_to_input_schema()` auto-derives JSON Schema from Python type hints
+- `@register_tool` decorator in `mcp/__init__.py`: ergonomic wrapper with auto-schema
+- All 10 core tools in `core.py` converted to `@register_tool` (net: 54 insertions, 245 deletions)
+- All 80 MCP tests pass
 
 ---
 
