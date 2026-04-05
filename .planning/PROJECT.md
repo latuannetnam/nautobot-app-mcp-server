@@ -111,4 +111,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-*Last updated: 2026-04-05 after v1.2.0 milestone started*
+*Last updated: 2026-04-05 after Phase 07 (setup) complete — Phase 08 (Infrastructure Management Commands) ready*
