@@ -44,7 +44,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 ## Phases
 
-### 🚧 Phase 7: Setup
+### ✅ Phase 7: Setup
 
 **Goal:** Prerequisite wiring — explicit uvicorn dependency, Docker env-var passthrough, `--workers 1` documentation.
 
@@ -73,7 +73,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 ---
 
-### Phase 8: Infrastructure — Management Commands
+### ✅ Phase 8: Infrastructure — Management Commands
 
 **Goal:** Two Django management commands that serve as the standalone MCP server entry points — production (`start_mcp_server.py`) and development (`start_mcp_dev_server.py`).
 
@@ -104,7 +104,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 
 ---
 
-### Phase 9: Tool Registration Refactor
+### ✅ Phase 9: Tool Registration Refactor
 
 **Goal:** Redesign tool registration for cross-process use. `@register_tool` decorator writes to in-memory registry; `tool_registry.json` enables discovery across the process boundary. All 10 core tools converted to `async def` + `sync_to_async`.
 
@@ -280,7 +280,7 @@ Phase 7 ──► Phase 8 ──► Phase 9 ──► Phase 10 ──► Phase 1
 | 4 | SKILL.md Package | v1.0 | 3/3 | Complete | 2026-04-02 |
 | 5 | MCP Server Refactor | v1.1.0 | 7/7 | Complete | 2026-04-04 |
 | 6 | UAT & Smoke Tests | v1.1.0 | 1/1 | Complete | 2026-04-04 |
-| 7 | Setup | v1.2.0 | 1/3 | Complete | 2026-04-05 |
+| 7 | Setup | v1.2.0 | 3/3 | Complete | 2026-04-05 |
 | 8 | Infrastructure | v1.2.0 | 4/4 | Complete | 2026-04-05 |
 | 9 | Tool Registration | v1.2.0 | 6/6 | Complete | 2026-04-05 |
 | 10 | Session State | v1.2.0 | 0/4 | Not started | — |
