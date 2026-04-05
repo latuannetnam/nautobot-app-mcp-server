@@ -1,10 +1,11 @@
-"""Tests for post_migrate signal timing and tool registration."""
+"""Tests for MCPToolRegistry and tool registration API.
+
+Phase 9 replaced post_migrate signal wiring with ready() writing tool_registry.json.
+See NautobotAppMcpServerConfig.ready() in the package __init__.py.
+"""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-from django.db.models.signals import post_migrate
 from django.test import TestCase
 
 from nautobot_app_mcp_server.mcp import register_mcp_tool
@@ -229,29 +230,7 @@ class RegisterMCPToolAPITestCase(TestCase):
         self.assertEqual(tool.tier, "app")
 
 
-class PostMigrateSignalTestCase(TestCase):
-    """Test the post_migrate signal wiring."""
-
-    def test_ready_connects_post_migrate(self):
-        """NautobotAppMcpServerConfig.ready() connect post_migrate signal."""
-        # The handler is connected by ready() called at app startup
-        # Just verify the signal module is accessible
-        self.assertTrue(hasattr(post_migrate, "connect"))
-
-    def test_on_post_migrate_only_runs_for_this_app(self):
-        """_on_post_migrate guard checks app name before registering."""
-        from nautobot_app_mcp_server import NautobotAppMcpServerConfig
-
-        # Create a mock app_config for a different app
-        mock_other_app = MagicMock()
-        mock_other_app.name = "some_other_app"
-
-        # Should not raise and should not register any tools
-        with patch(
-            "nautobot_app_mcp_server.mcp.registry.MCPToolRegistry.get_instance",
-            return_value=MagicMock(),
-        ):
-            NautobotAppMcpServerConfig._on_post_migrate(mock_other_app)
-
-        # If we get here without error, the guard works
-        self.assertEqual(mock_other_app.name, "some_other_app")
+# post_migrate signal tests removed.
+# post_migrate never fires in the MCP server process (Phase 8 runs django.setup()
+# directly, not nautobot-server). Phase 9 replaced it with ready() writing
+# tool_registry.json — see NautobotAppMcpServerConfig.ready() in __init__.py.
