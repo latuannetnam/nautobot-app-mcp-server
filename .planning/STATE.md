@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: Milestone Goal
 status: executing
-last_updated: "2026-04-05T11:16:48.233Z"
+last_updated: "2026-04-05T11:22:20Z"
 last_activity: 2026-04-05
 progress:
   total_phases: 6
@@ -25,7 +25,7 @@ Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-04-05
 
-Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Phase 9 executing (1/6 plans)
+Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Phase 9 executing (2/6 plans)
 
 **Phase 09-01 completed** (`09-01-SUMMARY.md`):
 
@@ -33,6 +33,14 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 - `@register_tool` decorator in `mcp/__init__.py`: ergonomic wrapper with auto-schema
 - All 10 core tools in `core.py` converted to `@register_tool` (net: 54 insertions, 245 deletions)
 - All 80 MCP tests pass
+
+**Phase 09-04 completed** (`09-PLAN-04-SUMMARY.md`):
+
+- Confirmed all 10 core read tools use `async def` + `sync_to_async(thread_sensitive=True)` pattern
+- `grep -c "^async def _"` returns 10
+- `grep -c "sync_to_async(query_utils._sync_"` returns 10
+- No module-level Django model imports in `core.py`
+- `ToolContext` imported from `fastmcp.server.context`
 
 ---
 
@@ -71,7 +79,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 |---|---|---|---|---|---|
 | Phase 7 | Setup | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 8 | Infrastructure | Complete | 2026-04-05 | 2026-04-05 | None |
-| Phase 9 | Tool Registration | Not Started | — | — | Phase 8 |
+| Phase 9 | Tool Registration | In Progress | 2026-04-05 | — | Phase 8 |
 | Phase 10 | Session State | Not Started | — | — | Phase 9 |
 | Phase 11 | Auth Refactor | Not Started | — | — | Phase 10 |
 | Phase 12 | Bridge Cleanup | Not Started | — | — | Phase 11 |
