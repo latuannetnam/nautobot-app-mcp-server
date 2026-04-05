@@ -78,17 +78,19 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 
 ---
 
-## Current Milestone: v1.1.0 MCP Server Refactor
+## Current Milestone: v1.2.0 Separate Process Refactor
 
-**Goal:** Research django-mcp-server deeply, then refactor the MCP server to fix critical session state and progressive disclosure bugs identified in `docs/dev/mcp-implementation-analysis.md`.
+**Goal:** Migrate the embedded MCP server (Option A) to a separate-process architecture (Option B), eliminating the WSGI→ASGI bridge complexity. The MCP server runs as a standalone FastMCP process managed via Django management commands, communicating with Nautobot via `nautobot.setup()` and `sync_to_async` ORM wrappers.
 
 **Target features:**
-- Fix P0: Replace `asyncio.run()` with `async_to_sync` in `view.py` — session state broken
-- Fix P0: Fix progressive disclosure session context access (`Server.request_context.get()` LookupError)
-- Fix P1: Thread-safe singleton locking for `get_mcp_app()`
-- Fix P1: User token lookup caching in auth layer
-- Fix P1: Derive server address from `request.get_host()` in ASGI scope
-- UAT coverage: update UAT tests, ensure all unit tests pass
+- Migrate FastMCP server from embedded (Option A) to separate-process (Option B) via Django management commands
+- `start_mcp_server.py` — production: `mcp.run(transport="sse")`, systemd-managed
+- `start_mcp_dev_server.py` — development: uvicorn + `create_app()` factory with auto-reload
+- `nautobot.setup()` bootstraps Django ORM once per worker
+- Session state as normal dict keyed by FastMCP session ID (no monkey-patching)
+- Progressive disclosure via scope-checking decorator (no `mcp._list_tools_mcp` override)
+- Migrate all UAT tests to validate the new architecture
+- Preserve: `MCPToolRegistry`, `register_mcp_tool()` API, pagination, query patterns, auth, `.restrict()`
 
 ## Evolution
 
@@ -109,4 +111,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-*Last updated: 2026-04-03 after v1.1.0 milestone started*
+*Last updated: 2026-04-05 after v1.2.0 milestone started*
