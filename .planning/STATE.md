@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: Milestone Goal
 status: executing
-last_updated: "2026-04-06"
-last_activity: 2026-04-06 -- Phase 12 execution complete (bridge cleanup)
+last_updated: "2026-04-06T00:38:57.062Z"
+last_activity: 2026-04-06 -- Phase 13 execution started
 progress:
-  total_phases: 7
-  completed_phases: 6
-  total_plans: 6
-  completed_plans: 6
-  percent: 86
+  total_phases: 3
+  completed_phases: 0
+  total_plans: 7
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State — `nautobot-app-mcp-server`
@@ -21,10 +21,10 @@ progress:
 
 ## Current Position
 
-Phase: 13 (UAT & Validation)
-Plan: Not started
-Status: Ready to discuss/plan
-Last activity: 2026-04-06 -- Phase 12 execution complete
+Phase: 13 (uat-validation) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 13
+Last activity: 2026-04-06 -- Phase 13 execution started
 
 Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–12 complete (27/27 plans); Phase 13 next
 
@@ -42,6 +42,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–12 complete (27/27 plans);
 - **P5-06** `SKILL.md` updated with `http://localhost:8005/mcp/` endpoint + date bumped to 2026-04-06
 
 **Bonus cleanup:**
+
 - Deleted `test_view.py` (7 tests for Option A code — no value keeping)
 - Updated `test_session_persistence.py` `@skip` comment + `cls.endpoint`/`cls.base_url` from `localhost:8080/plugins/...` → `localhost:8005/mcp`
 
@@ -54,6 +55,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–12 complete (27/27 plans);
 **Phase 11-01 and 11-02 completed** (2026-04-06):
 
 **11-01 — `get_user_from_request()` async refactor:**
+
 - `_cached_user` attribute → `_CACHED_USER_KEY = "mcp:cached_user"` constant
 - `def get_user_from_request` → `async def get_user_from_request`
 - Cache read: `await ctx.get_state(_CACHED_USER_KEY)` — cache-hit re-validates user via `User.objects.get(pk=id)` (T-11-04)
@@ -63,11 +65,13 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–12 complete (27/27 plans);
 - 12/12 auth tests pass; 31/31 core tool tests pass; 98/98 MCP tests pass (2 skipped)
 
 **11-02 — Call sites + nginx docs:**
+
 - All 10 handlers in `core.py`: `user = get_user_from_request(ctx)` → `user = await get_user_from_request(ctx)`
 - `.restrict(` count in `query_utils.py`: 19 (unchanged from baseline)
 - `docs/admin/upgrade.md`: new "Production Deployment (nginx)" section documenting `proxy_set_header Authorization $http_authorization;`
 
 **Key decisions:**
+
 - Chose `ctx.set_state`/`ctx.get_state` (Phase 10 session state API) over `ctx.request_context.session["cached_user"]` — `ServerSession` has no dict interface
 - Django 4.2 `SynchronousOnlyOperation` blocks sync ORM calls from ANY async context (including `AsyncToSync` thread pools); resolved by `token_key_to_user` fixture mock
 
