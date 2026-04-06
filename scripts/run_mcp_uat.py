@@ -13,7 +13,7 @@ Usage:
     unset VIRTUAL_ENV && cd /path/to/project && poetry run python scripts/run_mcp_uat.py
 
 Environment variables (from nautobot_import.env):
-    MCP_DEV_URL      MCP server URL (default: http://localhost:8080)
+    MCP_DEV_URL      MCP server URL (default: http://localhost:8005)
     MCP_DEV_TOKEN     Dev auth token (default: from development/creds.env)
 
 Prerequisites:
@@ -41,8 +41,8 @@ ENV_FILE = Path(__file__).parent.parent / "nautobot_import.env"
 if ENV_FILE.exists():
     load_dotenv(ENV_FILE)
 
-DEV_URL = os.environ.get("MCP_DEV_URL", "http://localhost:8080").rstrip("/")
-MCP_ENDPOINT = f"{DEV_URL}/plugins/nautobot-app-mcp-server/mcp/"
+MCP_DEV_URL = os.environ.get("MCP_DEV_URL", "http://localhost:8005")
+MCP_ENDPOINT = f"{MCP_DEV_URL}/mcp/"
 DEV_TOKEN = os.environ.get(
     "NAUTOBOT_DEV_TOKEN",
     os.environ.get("NAUTOBOT_SUPERUSER_API_TOKEN", "0123456789abcdef0123456789abcdef01234567"),
