@@ -21,7 +21,7 @@ class NautobotAppMcpServerConfig(NautobotAppConfig):
     default_settings = {}
     docs_view_name = "plugins:nautobot_app_mcp_server:docs"
     searchable_models = []
-    urls = ["nautobot_app_mcp_server.urls"]
+    urls = []
 
     def ready(self) -> None:
         """Initialize the MCP server app.

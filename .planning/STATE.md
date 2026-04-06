@@ -4,29 +4,48 @@ milestone: v1.2.0
 milestone_name: Milestone Goal
 status: executing
 last_updated: "2026-04-06"
-last_activity: 2026-04-06 -- Phase 11 execution complete (2/2 plans)
+last_activity: 2026-04-06 -- Phase 12 execution complete (bridge cleanup)
 progress:
-  total_phases: 4
-  completed_phases: 0
-  total_plans: 2
-  completed_plans: 0
-  percent: 0
+  total_phases: 7
+  completed_phases: 6
+  total_plans: 6
+  completed_plans: 6
+  percent: 86
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-05 (Phase 11 context gathered)
+**Last updated:** 2026-04-06 (Phase 12 execution complete)
 
 ---
 
 ## Current Position
 
-Phase: 11
+Phase: 13 (UAT & Validation)
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-05 -- Phase 11 planning complete
+Status: Ready to discuss/plan
+Last activity: 2026-04-06 -- Phase 12 execution complete
 
-Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans); Phase 11 context gathered
+Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–12 complete (27/27 plans); Phase 13 next
+
+---
+
+## Phase 12 Summary (Bridge Cleanup — Complete)
+
+**All 6 requirements delivered (P5-01 through P5-06) + bonus test cleanup:**
+
+- **P5-01** Deleted `mcp/view.py` — ASGI bridge + `mcp_view` Django view (Option A only)
+- **P5-02** Deleted `mcp/server.py` — FastMCP factory, `_list_tools_mcp` override, daemon thread globals (Option A only)
+- **P5-03** `__init__.py`: `urls = []` — removed plugin URLconf; `urls.py` emptied (was importing deleted `view.py`)
+- **P5-04** `_list_tools_mcp` override — removed as a consequence of deleting `server.py`; no standalone step needed
+- **P5-05** Old endpoint returns 404 — `Resolver404` confirmed via Django URL resolver
+- **P5-06** `SKILL.md` updated with `http://localhost:8005/mcp/` endpoint + date bumped to 2026-04-06
+
+**Bonus cleanup:**
+- Deleted `test_view.py` (7 tests for Option A code — no value keeping)
+- Updated `test_session_persistence.py` `@skip` comment + `cls.endpoint`/`cls.base_url` from `localhost:8080/plugins/...` → `localhost:8005/mcp`
+
+**Verification:** 91 tests pass, 2 skipped (`test_session_persistence.py` — intentionally skipped, requires live server)
 
 ---
 
@@ -155,7 +174,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans);
 | Phase 9 | Tool Registration | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 10 | Session State | Complete | 2026-04-05 | 2026-04-05 | None |
 | Phase 11 | Auth Refactor | Complete | 2026-04-06 | 2026-04-06 | None |
-| Phase 12 | Bridge Cleanup | Not Started | — | — | Phase 11 |
+| Phase 12 | Bridge Cleanup | Complete | 2026-04-06 | 2026-04-06 | Phase 11 |
 | Phase 13 | UAT & Validation | Not Started | — | — | Phase 12 |
 
 ---
@@ -171,6 +190,7 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phases 7–10 complete (17/17 plans);
 | 0.1.0 | 2026-04-05 | Phase 9 | v1.2.0 Phase 9 tool registration refactor complete (`8da04f1`) |
 | 0.1.0 | 2026-04-05 | Phase 10 | v1.2.0 Phase 10 session state simplification complete (`55e4694`) |
 | 0.1.0 | 2026-04-06 | Phase 11 | v1.2.0 Phase 11 auth refactor complete (2/2 plans, 98/98 tests pass) |
+| 0.1.0 | 2026-04-06 | Phase 12 | v1.2.0 Phase 12 bridge cleanup complete (6/6 plans, 91/91 tests pass) |
 
 ---
 

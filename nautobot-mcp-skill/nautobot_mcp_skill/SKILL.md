@@ -1,7 +1,7 @@
 # Nautobot MCP Server — AI Agent Skill
 
 Version: 0.1.0a0
-Last Updated: 2026-04-02
+Last Updated: 2026-04-06
 Nautobot: >=3.0.0, <4.0.0
 
 ---
@@ -13,6 +13,8 @@ This skill provides MCP tools for querying Nautobot network inventory data. All 
 ---
 
 ## Quick Start
+
+**MCP Endpoint:** `http://localhost:8005/mcp/` (standalone FastMCP server, v1.2.0+)
 
 - Call `mcp_list_tools()` to discover all available tools for the current session
 - Call `mcp_enable_tools(scope="dcim")` to enable DCIM tools (devices, interfaces)

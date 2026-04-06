@@ -7,7 +7,7 @@ header. This is the primary acceptance test for the Phase 5 refactor.
 NOTE: These tests are SKIPPED from the Django test runner because Django's
 APPEND_SLASH middleware cannot be overridden for an external live server.
 Django's @override_settings(APPEND_SLASH=False) only affects the test
-runner's own URL resolver — not the live Nautobot server at localhost:8080.
+runner's own URL resolver — not the live MCP server at localhost:8005.
 The live server always has APPEND_SLASH=True and returns 307 redirects that
 strip POST bodies, making HTTP integration testing impossible from the test
 runner. The session persistence behavior is verified via:
@@ -25,7 +25,7 @@ runner. The session persistence behavior is verified via:
         c.execute("INSERT INTO users_token VALUES (%s,%s,%s,%s,true,\'\')",
                   [str(tid), u.id, timezone.now(), key])
     sid = str(uuid.uuid4())
-    r1 = requests.post("http://localhost:8080/plugins/nautobot-app-mcp-server/mcp",
+    r1 = requests.post("http://localhost:8005/mcp",
         json={"jsonrpc":"2.0","id":1,"method":"initialize","params":{}},
         headers={"Content-Type":"application/json","Accept":"application/json",
                  "mcp-session-id":sid,"Authorization":"Token "+key},
@@ -53,7 +53,7 @@ from nautobot.users.models import Token
     "APPEND_SLASH=True on live server causes 307 redirect that strips POST body; "
     "test is SKIPPED from Django test runner. "
     "Verify via: docker exec nautobot-app-mcp-server-nautobot-1 bash "
-    "-c 'requests.post(...http://localhost:8080/plugins/nautobot-app-mcp-server/mcp...)'"
+    "-c 'requests.post(...http://localhost:8005/mcp...)'"
 )
 @tag("requires_live_server")
 class MCPSessionPersistenceTestCase(TestCase):
@@ -75,8 +75,8 @@ class MCPSessionPersistenceTestCase(TestCase):
         cls.token = Token.objects.create(user=cls.user)
         # Trailing slash required by Django APPEND_SLASH; do NOT follow redirects
         # since Django can't preserve POST body on 307 redirect.
-        cls.endpoint = "/plugins/nautobot-app-mcp-server/mcp/"
-        cls.base_url = "http://localhost:8080"
+        cls.endpoint = "/mcp"
+        cls.base_url = "http://localhost:8005"
         cls.session_id = str(uuid.uuid4())  # Fresh session ID for this test
 
     @classmethod
