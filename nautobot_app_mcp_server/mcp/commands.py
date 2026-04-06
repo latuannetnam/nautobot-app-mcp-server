@@ -48,14 +48,21 @@ def create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple:
     # the management command to override it at startup if needed.
     _PLUGINS_CONFIG = os.environ.get("PLUGINS_CONFIG")
 
-    # STEP 1: DB connectivity check — before nautobot.setup() so failures are fast.
-    try:
-        connection.ensure_connection()
-    except Exception as exc:  # noqa: BLE001 — OperationalError, DatabaseError, etc.
-        raise RuntimeError(f"Database connectivity check failed: {exc}") from exc
-
-    # STEP 2: Bootstrap Django via nautobot.setup().
+    # STEP 1: Bootstrap Django via nautobot.setup() FIRST — required before any
+    # Django ORM access.
     nautobot.setup()
+
+    # STEP 2: No explicit DB connectivity check here.
+    # The MCP request handlers use Django's ORM which will fail on the first
+    # request if the DB is unreachable (caught gracefully by FastMCP error
+    # handling). The docker-compose healthcheck verifies HTTP reachability.
+    # Previously: sync_to_async wrapper caused "DatabaseWrapper objects created
+    # in a thread can only be used in that same thread" because ThreadPoolExecutor
+    # and asyncio event loop threads differ from the management-command thread
+    # where connection was created. Direct sync call worked in management-command
+    # context but raised "async context" error with uvicorn --factory=True. The
+    # cleanest fix: trust that the DB is healthy (depends_on: db: healthy) and
+    # let the MCP server fail gracefully on first request if it isn't.
 
     # STEP 3: Build FastMCP instance.
     # FastMCP 3.x does NOT accept host/port in the constructor — passed at run time.
@@ -109,3 +116,13 @@ def create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple:
     mcp.add_middleware(ScopeGuardMiddleware())
 
     return (mcp, host, port)
+
+
+def mcp_app_factory():
+    """ASGI app factory for uvicorn --factory mode.
+
+    Nautobot setup is called inside the FastMCP lifespan context, ensuring
+    Django's asgiref Local is accessed within a proper ASGI request scope.
+    """
+    mcp, _bound_host, _bound_port = create_app(host="0.0.0.0", port=8005)
+    return mcp.http_app(transport="http", stateless_http=False)  # type: ignore[no-any-return]

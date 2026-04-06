@@ -73,18 +73,20 @@ class Command(BaseCommand):
             )
         )
 
-        # mcp.http_app() returns a StarletteWithLifespan ASGI callable.
-        # FastMCP 3.x: stateless_http passed at run time via http_app().
-        mcp_app = mcp.http_app(transport="http", stateless_http=False)
-
         # reload_dirs scoped to nautobot_app_mcp_server/ only (D-08).
         package_root = Path(__file__).resolve().parents[3] / "nautobot_app_mcp_server"
 
+        # Pass as import string so uvicorn reload works.
+        # mcp_app_factory is defined in commands.py and calls create_app()
+        # which calls nautobot.setup() + connection.ensure_connection() — safe
+        # because uvicorn imports the symbol, then calls the factory function
+        # at startup, which runs synchronously in uvicorn's main thread.
         uvicorn.run(
-            mcp_app,
+            "nautobot_app_mcp_server.mcp.commands:mcp_app_factory",
             host=bound_host,
             port=bound_port,
             reload=True,
             reload_dirs=[str(package_root)],
             log_level="info",
+            factory=True,
         )

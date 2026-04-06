@@ -1,0 +1,28 @@
+---
+# docker-compose.mcp.yml — MCP server as a standalone service
+# Included by tasks.py compose_files (invoke start) alongside dev/postgres/redis overrides.
+x-nautobot-base: &nautobot-base
+  image: "nautobot-app-mcp-server/nautobot:${NAUTOBOT_VER}-py${PYTHON_VER}"
+  env_file:
+    - "development.env"
+    - "creds.env"
+  tty: true
+
+services:
+  mcp-server:
+    <<: *nautobot-base
+    command: "nautobot-server start_mcp_dev_server --host 0.0.0.0"
+    ports:
+      - "8005:8005"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - "./nautobot_config.py:/opt/nautobot/nautobot_config.py"
+      - "../:/source"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request, urllib.error; r=urllib.request.Request('http://127.0.0.1:8005/mcp', data=b'{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"initialize\\\",\\\"params\\\":{\\\"protocolVersion\\\":\\\"2024-11-05\\\",\\\"clientInfo\\\":{\\\"name\\\":\\\"healthcheck\\\",\\\"version\\\":\\\"1\\\"},\\\"capabilities\\\":{}}}', headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream'}, method='POST'); urllib.request.urlopen(r, timeout=10)\""]
+      interval: "15s"
+      timeout: "10s"
+      retries: 5
+      start_period: "120s"
