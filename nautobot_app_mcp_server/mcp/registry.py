@@ -16,6 +16,9 @@ class ToolDefinition:
         func: The callable tool function.
         description: Human-readable description for the MCP manifest.
         input_schema: JSON Schema dict for tool input parameters.
+        output_schema: JSON Schema dict for tool output. Must be an object type
+            if defined (MCP spec requirement). Stored so progressive disclosure
+            can return full Tool objects with outputSchema intact.
         tier: "core" for always-available tools, "app" for registered third-party tools.
         app_label: Django app label for app-tier tools (e.g. "netnam_cms_core").
         scope: Dot-separated scope string (e.g. "netnam_cms_core.juniper"). None for core tools.
@@ -25,6 +28,7 @@ class ToolDefinition:
     func: Callable
     description: str
     input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None = None
     tier: str = "core"
     app_label: str | None = None
     scope: str | None = None

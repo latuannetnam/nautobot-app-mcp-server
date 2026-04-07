@@ -1,6 +1,6 @@
 [
   {
-    "name": "_device_list_handler",
+    "name": "device_list",
     "description": "List network devices with status, platform, location, and more.",
     "tier": "core",
     "app_label": null,
@@ -22,7 +22,7 @@
     }
   },
   {
-    "name": "_device_get_handler",
+    "name": "device_get",
     "description": "Get a single device by name or ID, with interfaces prefetched.",
     "tier": "core",
     "app_label": null,
@@ -41,7 +41,7 @@
     }
   },
   {
-    "name": "_interface_list_handler",
+    "name": "interface_list",
     "description": "List network interfaces, optionally filtered by device name.",
     "tier": "core",
     "app_label": null,
@@ -67,7 +67,7 @@
     }
   },
   {
-    "name": "_interface_get_handler",
+    "name": "interface_get",
     "description": "Get a single interface by name or ID, with IP addresses prefetched.",
     "tier": "core",
     "app_label": null,
@@ -86,7 +86,7 @@
     }
   },
   {
-    "name": "_ipaddress_list_handler",
+    "name": "ipaddress_list",
     "description": "List IP addresses with tenant, VRF, status, and role.",
     "tier": "core",
     "app_label": null,
@@ -108,7 +108,7 @@
     }
   },
   {
-    "name": "_ipaddress_get_handler",
+    "name": "ipaddress_get",
     "description": "Get a single IP address by address or ID, with interfaces prefetched.",
     "tier": "core",
     "app_label": null,
@@ -127,7 +127,7 @@
     }
   },
   {
-    "name": "_prefix_list_handler",
+    "name": "prefix_list",
     "description": "List network prefixes with VRF, tenant, status, and role.",
     "tier": "core",
     "app_label": null,
@@ -149,7 +149,7 @@
     }
   },
   {
-    "name": "_vlan_list_handler",
+    "name": "vlan_list",
     "description": "List VLANs with site/group, status, and role.",
     "tier": "core",
     "app_label": null,
@@ -171,7 +171,7 @@
     }
   },
   {
-    "name": "_location_list_handler",
+    "name": "location_list",
     "description": "List locations with location type, parent, and tenant.",
     "tier": "core",
     "app_label": null,
@@ -193,7 +193,7 @@
     }
   },
   {
-    "name": "_search_by_name_handler",
+    "name": "search_by_name",
     "description": "Multi-model name search across devices, interfaces, IP addresses, VLANs, and locations. All search terms must match (AND semantics).",
     "tier": "core",
     "app_label": null,

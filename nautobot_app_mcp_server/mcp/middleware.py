@@ -51,7 +51,7 @@ class ScopeGuardMiddleware(FastMCPMiddleware):
         context: MiddlewareContext[CallToolRequestParams],
         call_next,
     ) -> Any:
-        params = context.method  # CallToolRequestParams — has .name
+        params = context.message  # CallToolRequestParams — has .name (NOT context.method)
         registry = MCPToolRegistry.get_instance()
         tool = registry._tools.get(params.name)
 

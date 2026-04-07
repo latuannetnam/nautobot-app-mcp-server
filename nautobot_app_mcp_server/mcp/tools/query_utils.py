@@ -55,7 +55,7 @@ def serialize_device(device: Device) -> dict[str, Any]:
     data["status"] = device.status.name if device.status else None
     data["role"] = device.role.name if device.role else None
     data["platform"] = device.platform.name if device.platform else None
-    data["device_type"] = device.device_type.display_name if device.device_type else None
+    data["device_type"] = device.device_type.model if device.device_type else None
     data["manufacturer"] = (
         device.device_type.manufacturer.name if device.device_type and device.device_type.manufacturer else None
     )
@@ -104,15 +104,17 @@ def serialize_interface(interface: Interface) -> dict[str, Any]:
     data["device"] = interface.device.name if interface.device else None
     data["role"] = interface.role.name if interface.role else None
     data["lag"] = interface.lag.name if interface.lag else None
-    data["parent"] = interface.parent.name if interface.parent else None
+    data["parent"] = interface.parent_interface.name if interface.parent_interface else None
     data["bridge"] = interface.bridge.name if interface.bridge else None
-    data["virtual_device_context"] = interface.virtual_device_context.name if interface.virtual_device_context else None
+    # virtual_device_contexts is a M2M relation in Nautobot 3.x
+    vdc_list = list(interface.virtual_device_contexts.all())
+    data["virtual_device_context"] = vdc_list[0].name if vdc_list else None
     data["untagged_vlan"] = interface.untagged_vlan.name if interface.untagged_vlan else None
     # Serialize IP addresses inline (prefetched on interface_get)
     if hasattr(interface, "_prefetched_objects_cache") and "ip_addresses" in interface._prefetched_objects_cache:  # noqa: E501
-        data["ip_addresses"] = [{"pk": str(ip.pk), "address": ip.address} for ip in interface.ip_addresses.all()]
+        data["ip_addresses"] = [{"pk": str(ip.pk), "address": ip.host} for ip in interface.ip_addresses.all()]
     else:
-        data["ip_addresses"] = [{"pk": str(ip.pk), "address": ip.address} for ip in interface.ip_addresses.all()]
+        data["ip_addresses"] = [{"pk": str(ip.pk), "address": ip.host} for ip in interface.ip_addresses.all()]
     return data
 
 
@@ -122,15 +124,16 @@ def serialize_ipaddress(ip: IPAddress) -> dict[str, Any]:
 
     data = model_to_dict(
         ip,
-        fields=["pk", "address", "dns_name", "description", "ip_version"],
+        fields=["pk", "dns_name", "description", "ip_version"],
         exclude=_STANDARD_EXCLUDE,
     )
+    # "host" is the actual DB field name in Nautobot 3.0.0; expose as "address" for API compat
+    data["address"] = ip.host
     data["pk"] = str(ip.pk)
     data["status"] = ip.status.name if ip.status else None
     data["role"] = ip.role.name if ip.role else None
     data["tenant"] = ip.tenant.name if ip.tenant else None
-    data["vrf"] = ip.vrf.name if ip.vrf else None
-    data["namespace"] = ip.namespace.name if ip.namespace else None
+    # vrf/namespace do not exist on Nautobot 3.0.0 IPAddress model
     # Serialize interfaces inline (prefetched on ipaddress_get)
     if hasattr(ip, "_prefetched_objects_cache") and "interfaces" in ip._prefetched_objects_cache:
         data["interfaces"] = [
@@ -159,15 +162,22 @@ def serialize_prefix(prefix: Prefix) -> dict[str, Any]:
 
     data = model_to_dict(
         prefix,
-        fields=["pk", "prefix", "description", "type", "date_allocated"],
+        fields=["pk", "description", "type", "date_allocated"],
         exclude=_STANDARD_EXCLUDE,
     )
+    # "network" is the actual DB field name in Nautobot 3.0.0; expose as "prefix" for API compat
+    data["prefix"] = str(prefix.network)
     data["pk"] = str(prefix.pk)
     data["status"] = prefix.status.name if prefix.status else None
     data["role"] = prefix.role.name if prefix.role else None
     data["tenant"] = prefix.tenant.name if prefix.tenant else None
-    data["vrf"] = prefix.vrf.name if prefix.vrf else None
-    data["namespace"] = prefix.namespace.name if prefix.namespace else None
+    # vrfs is M2M in Nautobot 3.x IPAM (no direct FK vrf field)
+    data["vrfs"] = [vrf.name for vrf in prefix.vrfs.all()]
+    # Also expose singular "vrf" for API compat (first VRF name, or None)
+    vrfs_list = list(prefix.vrfs.all())
+    data["vrf"] = vrfs_list[0].name if vrfs_list else None
+    # namespace is a direct CharField in Nautobot 3.x IPAM (not a relation)
+    data["namespace"] = str(prefix.namespace) if prefix.namespace else None
     # locations is M2M in Nautobot v2.x
     data["locations"] = [loc.name for loc in prefix.locations.all()]
     return data
@@ -186,7 +196,8 @@ def serialize_vlan(vlan: VLAN) -> dict[str, Any]:
     data["status"] = vlan.status.name if vlan.status else None
     data["role"] = vlan.role.name if vlan.role else None
     data["tenant"] = vlan.tenant.name if vlan.tenant else None
-    data["group"] = vlan.group.name if vlan.group else None
+    # vlan_group is the FK field name in Nautobot 3.x (not "group")
+    data["group"] = vlan.vlan_group.name if vlan.vlan_group else None
     # locations is M2M in Nautobot v2.x
     data["locations"] = [loc.name for loc in vlan.locations.all()]
     return data
@@ -237,9 +248,8 @@ def build_interface_qs() -> QuerySet[Interface]:
         "status",
         "role",
         "lag",
-        "parent",
+        "parent_interface",
         "bridge",
-        "virtual_device_context",
         "untagged_vlan",
     )
 
@@ -253,11 +263,11 @@ def build_ipaddress_qs() -> QuerySet[IPAddress]:
     """Build an IPAddress queryset with select_related for FK fields."""
     from nautobot.ipam.models import IPAddress  # lazy import — avoids module-level Nautobot model import
 
+    # namespace and vrf are NOT FK fields in Nautobot 3.x IPAM
+    # namespace is a CharField; vrfs is M2M — accessed directly in serialize
     return IPAddress.objects.select_related(
         "status",
         "tenant",
-        "vrf",
-        "namespace",
     )
 
 
@@ -270,13 +280,13 @@ def build_prefix_qs() -> QuerySet[Prefix]:
     """Build a Prefix queryset with select_related for FK fields."""
     from nautobot.ipam.models import Prefix  # lazy import — avoids module-level Nautobot model import
 
+    # vrf and namespace are NOT FK fields in Nautobot 3.x IPAM
+    # namespace is a CharField; vrfs is M2M — accessed directly in serialize
     return Prefix.objects.select_related(
         "status",
         "role",
         "tenant",
-        "vrf",
-        "namespace",
-    ).prefetch_related("locations")
+    ).prefetch_related("locations", "vrfs")
 
 
 def build_vlan_qs() -> QuerySet[VLAN]:
@@ -287,7 +297,7 @@ def build_vlan_qs() -> QuerySet[VLAN]:
         "status",
         "role",
         "tenant",
-        "group",
+        "vlan_group",
     ).prefetch_related("locations")
 
 
@@ -408,7 +418,7 @@ def _sync_ipaddress_get(user: User, name_or_id: str) -> dict[str, Any]:
     if _looks_like_uuid(name_or_id):
         qs = build_ipaddress_qs_with_interfaces().filter(pk=name_or_id).restrict(user, action="view")
     else:
-        qs = build_ipaddress_qs_with_interfaces().filter(address=name_or_id).restrict(user, action="view")
+        qs = build_ipaddress_qs_with_interfaces().filter(host=name_or_id).restrict(user, action="view")
     ips = list(qs)
     if not ips:
         raise ValueError(f"IP address '{name_or_id}' not found")
@@ -513,10 +523,10 @@ def _sync_search_by_name(
         return Q(**{f"{model_field}__icontains": term})
 
     def _address_contains(term: str) -> Q:
-        return Q(address__icontains=term)
+        return Q(host__icontains=term)
 
     def _prefix_contains(term: str) -> Q:
-        return Q(prefix__icontains=term)
+        return Q(network__icontains=term)
 
     # Search across 6 models sequentially and combine results.
     # Each model gets its own queryset filtered by all terms (AND across terms).
@@ -528,7 +538,7 @@ def _sync_search_by_name(
         .restrict(user, action="view")
         .filter(functools.reduce(op.and_, [_name_contains("name", t) for t in terms]))
     )
-    for device in qs_device:
+    for device in qs_device[: limit * 2]:
         all_results.append(
             {
                 "model": "dcim.device",
@@ -544,7 +554,7 @@ def _sync_search_by_name(
         .restrict(user, action="view")
         .filter(functools.reduce(op.and_, [_name_contains("name", t) for t in terms]))
     )
-    for interface in qs_interface:
+    for interface in qs_interface[: limit * 2]:
         all_results.append(
             {
                 "model": "dcim.interface",
@@ -560,12 +570,12 @@ def _sync_search_by_name(
         .restrict(user, action="view")
         .filter(functools.reduce(op.and_, [_address_contains(t) for t in terms]))
     )
-    for ip in qs_ip:
+    for ip in qs_ip[: limit * 2]:
         all_results.append(
             {
                 "model": "ipam.ipaddress",
                 "pk": str(ip.pk),
-                "name": ip.address,
+                "name": ip.host,
                 "data": serialize_ipaddress(ip),
             }
         )
@@ -576,12 +586,12 @@ def _sync_search_by_name(
         .restrict(user, action="view")
         .filter(functools.reduce(op.and_, [_prefix_contains(t) for t in terms]))
     )
-    for prefix in qs_prefix:
+    for prefix in qs_prefix[: limit * 2]:
         all_results.append(
             {
                 "model": "ipam.prefix",
                 "pk": str(prefix.pk),
-                "name": prefix.prefix,
+                "name": str(prefix.network),
                 "data": serialize_prefix(prefix),
             }
         )
@@ -592,7 +602,7 @@ def _sync_search_by_name(
         .restrict(user, action="view")
         .filter(functools.reduce(op.and_, [_name_contains("name", t) for t in terms]))
     )
-    for vlan in qs_vlan:
+    for vlan in qs_vlan[: limit * 2]:
         all_results.append(
             {
                 "model": "ipam.vlan",
@@ -608,7 +618,7 @@ def _sync_search_by_name(
         .restrict(user, action="view")
         .filter(functools.reduce(op.and_, [_name_contains("name", t) for t in terms]))
     )
-    for location in qs_location:
+    for location in qs_location[: limit * 2]:
         all_results.append(
             {
                 "model": "dcim.location",
@@ -626,9 +636,10 @@ def _sync_search_by_name(
     start_idx = 0
     if cursor:
         decoded = decode_cursor(cursor)
-        # Cursor format: base64(f"{model}.{pk}")
+        # Cursor format: base64(f"{model}@{pk}") — "@" is safe since neither
+        # model names nor UUID strings contain it.
         try:
-            last_model, last_pk = decoded.split(".", 1)
+            last_model, last_pk = decoded.split("@", 1)
             for i, r in enumerate(all_results):
                 if r["model"] == last_model and r["pk"] == last_pk:
                     start_idx = i + 1
@@ -643,7 +654,7 @@ def _sync_search_by_name(
     next_cursor = None
     if has_next and page:
         last_item = page[-1]
-        next_cursor = encode_cursor(f"{last_item['model']}.{last_item['pk']}")
+        next_cursor = encode_cursor(f"{last_item['model']}@{last_item['pk']}")
 
     summary = None
     if total_count > 100:

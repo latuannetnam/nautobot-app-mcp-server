@@ -209,7 +209,7 @@ async def _mcp_enable_tools_impl(
     ctx: ToolContext,
     scope: str | None = None,
     search: str | None = None,
-) -> str:
+) -> dict[str, str]:
     """Enable tool scopes or fuzzy-search matches for this session.
 
     Either ``scope`` OR ``search`` (or both) must be provided.
@@ -234,14 +234,14 @@ async def _mcp_enable_tools_impl(
         search: Fuzzy search term to match tool names/descriptions.
 
     Returns:
-        Human-readable summary of what was enabled.
+        dict with "result": human-readable summary of what was enabled.
     """
     if scope is None and search is None:
-        return "Provide at least one of: scope= or search="
+        return {"result": "Provide at least one of: scope= or search="}
 
     state = ToolScopeState()
     parts = await state.apply_enable(ctx, scope, search)
-    return f"Enabled: {', '.join(parts)}"
+    return {"result": f"Enabled: {', '.join(parts)}"}
 
 
 @register_tool(
@@ -252,7 +252,7 @@ async def _mcp_enable_tools_impl(
 async def _mcp_disable_tools_impl(
     ctx: ToolContext,
     scope: str | None = None,
-) -> str:
+) -> dict[str, str]:
     """Disable a tool scope for this session.
 
     Disabling a parent scope (e.g. ``"dcim"``) disables all child scopes
@@ -270,13 +270,13 @@ async def _mcp_disable_tools_impl(
         scope: Dot-separated scope to disable. None = disable all.
 
     Returns:
-        Human-readable summary of what was disabled.
+        dict with "result": human-readable summary of what was disabled.
     """
     state = ToolScopeState()
     msg, child_count = await state.apply_disable(ctx, scope)
     if child_count > 0:
-        return f"{msg} and {child_count} child scope(s)."
-    return msg
+        return {"result": f"{msg} and {child_count} child scope(s)."}
+    return {"result": msg}
 
 
 @register_tool(
@@ -284,7 +284,7 @@ async def _mcp_disable_tools_impl(
     description="Return all registered tools visible to this session.",
     tier="core",
 )
-async def _mcp_list_tools_impl(ctx: ToolContext) -> str:
+async def _mcp_list_tools_impl(ctx: ToolContext) -> dict[str, str]:
     """Return all registered tools visible to this session.
 
     Returns a summary of:
@@ -300,7 +300,7 @@ async def _mcp_list_tools_impl(ctx: ToolContext) -> str:
         ctx: FastMCP ToolContext.
 
     Returns:
-        Multi-line string describing active tools and session state.
+        dict with "result": multi-line string describing active tools and session state.
     """
     from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry
 
@@ -328,7 +328,7 @@ async def _mcp_list_tools_impl(ctx: ToolContext) -> str:
             tools = registry.fuzzy_search(term)
             lines.append(f"  '{term}' → {len(tools)} tools")
 
-    return "\n".join(lines)
+    return {"result": "\n".join(lines)}
 
 
 # -------------------------------------------------------------------
@@ -342,7 +342,7 @@ def mcp_enable_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def mcp_enable_tools_impl(  # noqa: ANN202
         ctx: ToolContext, scope: str | None = None, search: str | None = None
-    ) -> str:
+    ) -> dict[str, str]:
         return await _mcp_enable_tools_impl(ctx, scope, search)
 
 
@@ -352,7 +352,7 @@ def mcp_disable_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def mcp_disable_tools_impl(  # noqa: ANN202
         ctx: ToolContext, scope: str | None = None
-    ) -> str:
+    ) -> dict[str, str]:
         return await _mcp_disable_tools_impl(ctx, scope)
 
 
@@ -360,5 +360,5 @@ def mcp_list_tools(mcp: FastMCP) -> None:
     """Register mcp_list_tools as a FastMCP tool on the given mcp instance."""
 
     @mcp.tool()
-    async def mcp_list_tools_impl(ctx: ToolContext) -> str:  # noqa: ANN202
+    async def mcp_list_tools_impl(ctx: ToolContext) -> dict[str, str]:  # noqa: ANN202
         return await _mcp_list_tools_impl(ctx)

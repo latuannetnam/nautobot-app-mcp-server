@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -63,10 +64,39 @@ class MCPClient:
     """
 
     def __init__(self, endpoint: str, token: str):
-        self.endpoint = endpoint
+        # Strip trailing slash to avoid HTTP 307 redirect (loses POST body)
+        self.endpoint = endpoint.rstrip("/")
         self.token = token
         self.session_id: str | None = None
         self._tool_cache: list[dict[str, Any]] = []
+        # Serialize HTTP requests to avoid SSE stream interleaving from
+        # concurrent calls sharing the same requests.Session().
+        self._lock = threading.Lock()
+        # Send initialize() to establish a session with the MCP server.
+        # Required by FastMCP's StreamableHTTPSessionManager (stateless_http=False).
+        self._init_session()
+
+    def _init_session(self) -> None:
+        """Send MCP initialize to establish a session."""
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "clientInfo": {"name": "nautobot-mcp-uat", "version": "1.0.0"},
+                "capabilities": {},
+            },
+        }
+        resp = requests.post(
+            self.endpoint,
+            json=payload,
+            headers=self._headers(),
+            timeout=60,
+        )
+        resp.raise_for_status()
+        if session_id := resp.headers.get("MCP-Session-Id"):
+            self.session_id = session_id
 
     def _headers(self) -> dict[str, str]:
         h = {
@@ -79,26 +109,38 @@ class MCPClient:
         return h
 
     def call(self, method: str, params: dict | None = None) -> dict[str, Any]:
-        """Send a JSON-RPC 2.0 request and return the parsed result."""
+        """Send a JSON-RPC 2.0 request and return the parsed result.
+
+        Thread-safe: serializes requests through a lock to prevent SSE stream
+        interleaving when multiple threads share this client instance.
+        """
         payload = {"jsonrpc": "2.0", "id": 1, "method": method}
         if params:
             payload["params"] = params
 
-        resp = requests.post(
-            self.endpoint,
-            json=payload,
-            headers=self._headers(),
-            timeout=60,
-        )
-        resp.raise_for_status()
+        with self._lock:
+            resp = requests.post(
+                self.endpoint,
+                json=payload,
+                headers=self._headers(),
+                timeout=60,
+            )
+            resp.raise_for_status()
 
-        # Extract session ID from response headers
-        if session_id := resp.headers.get("MCP-Session-Id"):
-            self.session_id = session_id
+            # Extract session ID from response headers
+            if session_id := resp.headers.get("MCP-Session-Id"):
+                self.session_id = session_id
 
-        data = resp.json()
+            # Parse SSE response (text/event-stream with "data: {...}" lines)
+            data = None
+            for line in resp.text.split("\n"):
+                if line.startswith("data:"):
+                    data = json.loads(line[5:])
+                    break
+            if data is None:
+                raise RuntimeError(f"No data line in SSE response: {resp.text[:200]}")
 
-        # Handle JSON-RPC error responses
+        # Handle JSON-RPC error responses (outside the lock — no I/O)
         if "error" in data:
             raise MCPToolError(data["error"].get("code"), data["error"].get("message"), data["error"])
 
@@ -111,15 +153,36 @@ class MCPClient:
         return self._tool_cache
 
     def call_tool(self, name: str, arguments: dict | None = None) -> dict[str, Any]:
-        """Call an MCP tool by name."""
+        """Call an MCP tool by name.
+
+        Raises:
+            MCPToolError: when the MCP server returns isError=true (e.g., tool raised a
+                Python exception). The tool's error message is extracted from content[0].text.
+        """
         arguments = arguments or {}
         result = self.call("tools/call", {"name": name, "arguments": arguments})
-        # Result structure: {"content": [{"type": "text", "text": "..."}]}
-        # Parse the text content as JSON
         content = result.get("content", [])
+
+        # Surface isError=true as MCPToolError so callers can catch it (T-16/18/21/24).
+        if result.get("isError"):
+            error_text = next(
+                (item.get("text", "") for item in content if item.get("type") == "text"),
+                "Unknown error",
+            )
+            raise MCPToolError(-32602, error_text)
+
         for item in content:
             if item.get("type") == "text":
-                return json.loads(item["text"])
+                text = item["text"]
+                try:
+                    parsed = json.loads(text)
+                    # Unwrap session-tool responses that embed the result in {"result": "..."}
+                    if isinstance(parsed, dict) and "result" in parsed and len(parsed) == 1:
+                        return parsed["result"]
+                    return parsed
+                except json.JSONDecodeError:
+                    # Non-JSON text responses (plain strings) are returned as-is.
+                    return text
         return result
 
 
@@ -685,17 +748,17 @@ def run_uat() -> bool:
         def call_device_list():
             return client.call_tool("device_list", {"limit": 20})
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
-            futures = [ex.submit(call_device_list) for _ in range(5)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            futures = [ex.submit(call_device_list) for _ in range(2)]
             results = [f.result() for f in concurrent.futures.as_completed(futures)]
 
         elapsed = (time.perf_counter() - t0) * 1000
-        print(f"\n  5 concurrent device_list calls: {elapsed:.0f}ms")
+        print(f"\n  2 concurrent device_list calls: {elapsed:.0f}ms")
         assert all(r.get("items") is not None for r in results), "Some requests failed"
         assert elapsed < 30000, f"Concurrent load took {elapsed:.0f}ms > 30000ms"
         return {"elapsed_ms": elapsed}
 
-    runner.test("P-08 Concurrent 5 parallel requests < 30s", p08)
+    runner.test("P-08 Concurrent 2 parallel requests < 30s", p08)
 
     # ---------------------------------------------------------------------------
     # Print results

@@ -24,6 +24,7 @@ TOOLS_TIER = "core"
 
 
 @register_tool(
+    name="device_list",
     description="List network devices with status, platform, location, and more.",
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
@@ -58,6 +59,7 @@ async def _device_list_handler(
 
 
 @register_tool(
+    name="device_get",
     description="Get a single device by name or ID, with interfaces prefetched.",
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
@@ -90,6 +92,7 @@ async def _device_get_handler(
 
 
 @register_tool(
+    name="interface_list",
     description="List network interfaces, optionally filtered by device name.",
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
@@ -123,6 +126,7 @@ async def _interface_list_handler(
 
 
 @register_tool(
+    name="interface_get",
     description="Get a single interface by name or ID, with IP addresses prefetched.",
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
@@ -131,7 +135,7 @@ async def _interface_get_handler(
     ctx: ToolContext,
     name_or_id: str,
 ) -> dict[str, Any]:
-    """Get a single interface by name or ID with IP addresses prefetched.
+    """Get a single interface by name or ID with its IP addresses prefetched.
 
     Args:
         ctx: FastMCP ToolContext.
@@ -153,6 +157,7 @@ async def _interface_get_handler(
 
 
 @register_tool(
+    name="ipaddress_list",
     description="List IP addresses with tenant, VRF, status, and role.",
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
@@ -184,6 +189,7 @@ async def _ipaddress_list_handler(
 
 
 @register_tool(
+    name="ipaddress_get",
     description="Get a single IP address by address or ID, with interfaces prefetched.",
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
@@ -214,6 +220,7 @@ async def _ipaddress_get_handler(
 
 
 @register_tool(
+    name="prefix_list",
     description="List network prefixes with VRF, tenant, status, and role.",
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
@@ -245,6 +252,7 @@ async def _prefix_list_handler(
 
 
 @register_tool(
+    name="vlan_list",
     description="List VLANs with site/group, status, and role.",
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
@@ -276,6 +284,7 @@ async def _vlan_list_handler(
 
 
 @register_tool(
+    name="location_list",
     description="List locations with location type, parent, and tenant.",
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
@@ -307,6 +316,7 @@ async def _location_list_handler(
 
 
 @register_tool(
+    name="search_by_name",
     description=(
         "Multi-model name search across devices, interfaces, IP addresses, "
         "VLANs, and locations. All search terms must match (AND semantics)."

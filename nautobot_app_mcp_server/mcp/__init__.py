@@ -52,6 +52,7 @@ def register_mcp_tool(
     tier: str = "app",
     app_label: str | None = None,
     scope: str | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> None:
     """Register a tool with the MCP tool registry.
 
@@ -67,6 +68,8 @@ def register_mcp_tool(
         app_label: Django app label (e.g. ``"netnam_cms_core"``). Required for app-tier tools.
         scope: Dot-separated scope string (e.g. ``"netnam_cms_core.juniper"``).
             Optional for app-tier tools; required when progressive disclosure is used.
+        output_schema: Optional JSON Schema dict for the tool's output. If None,
+            the tool's outputSchema is set to ``{"type": "object"}`` (FastMCP default).
 
     Raises:
         ValueError: If a tool with the same name is already registered.
@@ -86,6 +89,7 @@ def register_mcp_tool(
             func=func,
             description=description,
             input_schema=input_schema,
+            output_schema=output_schema,
             tier=tier,
             app_label=app_label,
             scope=scope,
