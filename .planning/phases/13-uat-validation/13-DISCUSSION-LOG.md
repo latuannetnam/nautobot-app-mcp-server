@@ -90,5 +90,60 @@ Phase 13 has **mechanical work** (3 files: new compose file, modified tasks.py, 
 
 ---
 
-*Discussion: 2026-04-06*
+---
+
+## Discussion Round 2: FastMCP `outputSchema` Bug (2026-04-07)
+
+### Symptom
+
+UAT run revealed that `device_get`, `interface_list`, `ipaddress_list`, `prefix_list`, `vlan_list`, `location_list`, and `search_by_name` all returned:
+```
+"Output validation error: outputSchema defined but no structured output returned"
+```
+
+### Root Cause Analysis
+
+**Execution path for FastMCP 3.2.0 HTTP transport:**
+
+```
+HTTP POST /mcp/ (tools/call)
+  → StreamableHTTPSessionManager.handle_request()
+    → MCP SDK ServerSession._handle_message()
+      → LowLevelServer.request_handlers[CallToolRequest]
+        → mcp.server.lowlevel.server.handle_call_tool()   ← validation fires HERE
+        → FastMCP._call_tool_mcp()                      ← NOT reached
+        → FastMCP.call_tool()
+          → tool._run()
+            → FunctionTool.run()
+              → convert_result() → ToolResult
+```
+
+**The chain:**
+1. FastMCP `FunctionTool.from_function()` derives `output_schema` from return annotation `dict[str, Any]` → `{"type": "object"}`
+2. `tool.to_mcp_tool()` exposes this as the MCP `Tool.outputSchema`
+3. MCP SDK `handle_call_tool()` checks: if `tool.outputSchema is not None AND maybe_structured_content is None` → error
+4. Our `convert_result()` returns `ToolResult(content=[TextContent(...)], structured_content=None)` (no structured content because result is not JSON-parseable as structured)
+5. MCP SDK detects mismatch → `"Output validation error: outputSchema defined but no structured output returned"`
+
+**Why `device_list` worked**: Different result structure or timing — the same error applies, but it may have been handled differently in FastMCP's internal path.
+
+### Temporary Fix Applied
+
+Patched `fastmcp/tools/function_tool.py` in the running container:
+```python
+# Line 234
+output_schema=None,  # Force None to avoid MCP SDK output validation errors
+```
+
+### Why This Fix is Not Clean
+
+1. **Doesn't survive `invoke build`**: The patch lives in `/usr/local/lib/python3.12/site-packages/fastmcp/` inside the container image. `invoke build` rebuilds the image from scratch, removing the patch.
+2. **Not in source control**: The patch is applied via `docker exec` — not committed anywhere.
+3. **Fragile**: Relies on line number staying at 234 in future FastMCP versions.
+
+### Alternative Approaches (to discuss)
+
+See `docs/dev/patch_fastmcp_issue.md` for full analysis.
+
+*Discussion: 2026-04-07*
 *Phase: 13-uat-validation*
