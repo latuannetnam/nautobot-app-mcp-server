@@ -92,4 +92,12 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] All milestones complete: v1.0, v1.1.0
 
 ---
 
+## Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|------------|
+| 260407-pdr | Rewrite README with MCP description, usage, development guide | 2026-04-07 | 4e6cc66 | [link](./quick/260407-pdr-rewrite-readme-md-with-mcp-server-descri/) |
+
+---
+
 *State last updated: 2026-04-07*
