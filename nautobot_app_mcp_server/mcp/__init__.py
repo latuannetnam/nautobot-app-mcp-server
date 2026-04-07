@@ -175,5 +175,14 @@ def register_all_tools_with_mcp(mcp: Any) -> None:
     """
     registry = MCPToolRegistry.get_instance()
     for tool in registry.get_all():
-        # mcp.tool() is a decorator in FastMCP 3.x — call it with kwargs
-        mcp.tool(tool.func, name=tool.name, description=tool.description)
+        # mcp.tool() is a decorator in FastMCP 3.x — call it with kwargs.
+        # Pass output_schema=None to suppress auto-derivation from return type
+        # annotations (e.g. dict[str, Any] → {"type": "object"}), which triggers
+        # the MCP SDK's output validation in handle_call_tool():
+        #   if tool.outputSchema is not None and maybe_structured_content is None
+        #       → "Output validation error: outputSchema defined but no structured
+        #          output returned"
+        # By explicitly setting output_schema=None we tell FastMCP not to set an
+        # outputSchema on the Tool, so the SDK skips the validation branch and
+        # returns the plain text content (JSON dump of the dict) instead.
+        mcp.tool(tool.func, name=tool.name, description=tool.description, output_schema=None)
