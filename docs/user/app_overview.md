@@ -1,32 +1,42 @@
 # App Overview
 
-This document provides an overview of the App including critical information and important considerations when applying it to your Nautobot environment.
+This document provides an overview of the Nautobot App MCP Server, including its purpose, audience, and the Nautobot features it interacts with.
 
 !!! note
     Throughout this documentation, the terms "app" and "plugin" will be used interchangeably.
 
 ## Description
 
-![Main Page](../media/ss_main_page_light.png#only-light)
-![Main Page](../media/ss_main_page_dark.png#only-dark)
+Nautobot App MCP Server is a **protocol adapter** — it is not a data model extension. The app adds no new database tables, custom fields, jobs, or web UI elements to Nautobot. Instead, it embeds a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server alongside Nautobot's HTTP service, exposing a curated set of typed read tools that AI agents can call via the MCP standard.
 
-## Audience (User Personas) - Who should use this App?
+The MCP server runs on **port 8005** (separate from Nautobot's web UI on port 8080). When an AI agent connects using a Nautobot API token, the server wraps Nautobot's Django ORM behind the MCP interface, enforcing the same object-level permissions that would apply to a human user logging into the Nautobot UI.
 
-!!! warning "Developer Note - Remove Me!"
-    Who is this meant for/ who is the common user of this app?
+The core value proposition is **AI-assisted network operations**: instead of writing one-off API scripts or exporting data manually, a network engineer or SRE can ask an AI agent to query Nautobot directly using natural language, and the agent uses MCP tools to fetch the data.
 
-## Authors and Maintainers
+## Audience (User Personas)
 
-!!! warning "Developer Note - Remove Me!"
-    Add the team and/or the main individuals maintaining this project. Include historical maintainers as well.
+This app is designed for:
+
+- **Network Engineers** who want AI agents to answer ad-hoc questions about network inventory — device lists, interface assignments, IP allocations — without leaving their terminal or writing API code.
+- **Site Reliability Engineers (SREs)** who manage Nautobot as a source of truth and want to integrate network data queries into automated runbooks and incident response workflows.
+- **AI/ML Practitioners** building automation or orchestration tools that need structured, permission-aware access to Nautobot's network data.
+- **Platform Teams** evaluating or building MCP-compatible AI integrations against Nautobot as a backend data source.
 
 ## Nautobot Features Used
 
-!!! warning "Developer Note - Remove Me!"
-    What is shown today in the Installed Apps page in Nautobot. What parts of Nautobot does it interact with, what does it add etc. ?
+This app uses only Nautobot's **core** infrastructure — it does not install custom models, signals, or jobs.
+
+| Nautobot Feature | How the App Uses It |
+|------------------|---------------------|
+| **Django ORM** | All read tools query Nautobot models (`dcim.Device`, `dcim.Interface`, `ipam.IPAddress`, etc.) via Django ORM. |
+| **Token Authentication** | MCP connections authenticate via the standard Nautobot REST API token (`Authorization: Token <hex>` header). The app never implements its own auth. |
+| **Object Permissions** | Every ORM query is restricted by `user.queryset(Model).restrict()` so agents see exactly what the associated token's user is permitted to view. |
+| **Plugin Infrastructure** | The app follows Nautobot's plugin pattern in `__init__.py` (`NautobotAppMcpServerConfig`) and registers its entry points via `pyproject.toml`. |
+| **App Config Schema** | `app-config-schema.json` is included for standard Nautobot app configuration validation. |
 
 ### Extras
 
-!!! warning "Developer Note - Remove Me!"
-    Custom Fields - things like which CFs are created by this app?
-    Jobs - are jobs, if so, which ones, installed by this app?
+This app does **not** create any custom fields, jobs, web UI views, or export templates. It is intentionally scoped to the MCP protocol layer only.
+
+!!! note
+    Because the app has no database models, there are no Django migrations to run after installation. The MCP server is available as soon as the plugin is activated.
