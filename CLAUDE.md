@@ -120,8 +120,8 @@ python -c 'from mcp.types import Tool; print(Tool)'
 
 **UAT tests** (run from host, NOT inside container):
 ```bash
-python scripts/test_mcp_simple.py       # 4 quick smoke tests
-python scripts/run_mcp_uat.py           # 37 full UAT tests
+python scripts/test_mcp_simple.py       # 8 quick smoke tests (P-01–P-08)
+python scripts/run_mcp_uat.py           # 37 full UAT tests (T-01–T-36)
 ```
 
 **Key Gotchas**
@@ -223,7 +223,7 @@ nautobot_app_mcp_server/
 │   │   ├── tools/
 │   │   │   ├── __init__.py       # Side-effect: imports all tools → @register_tool fires
 │   │   │   ├── core.py           # 10 read tools (device, interface, ipaddress, prefix, etc.)
-│   │   │   ├── pagination.py     # CursorPaginator: base64(pk) cursor, LIMIT_DEFAULT=25, LIMIT_MAX=1000
+│   │   │   ├── pagination.py     # PaginatedResult: base64(pk) cursor, LIMIT_DEFAULT=25, LIMIT_MAX=1000
 │   │   │   └── query_utils.py    # Query-building helpers, field name fixes for Nautobot 3.x
 │   │   └── tests/                # Unit tests (auth, session, core tools, commands, signal)
 │   ├── management/
@@ -236,7 +236,7 @@ nautobot_app_mcp_server/
 │   ├── docker-compose.mcp.yml    # MCP server service (port 8005, starts with invoke start)
 │   └── *.env                     # Environment config
 ├── scripts/
-│   ├── test_mcp_simple.py        # 4 quick smoke tests (run from host)
+│   ├── test_mcp_simple.py        # 8 quick smoke tests P-01–P-08 (run from host)
 │   ├── run_mcp_uat.py            # 37 full UAT tests (run from host)
 │   └── reset_dev_db.sh           # DB reset + production import
 ├── docs/dev/
