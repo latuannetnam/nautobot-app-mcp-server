@@ -192,7 +192,7 @@ This app has **no Django database models**. Removed: `models.py`, `filters.py`, 
 
 Use GSD commands for all implementation work. Do not make direct repo edits outside a GSD workflow unless the user explicitly asks.
 
-GSD commands available from `.claude/skills/`:
+GSD commands available from `.claude/skills/` of current project:
 
 | Command | Skill | When to use |
 |---|---|---|
