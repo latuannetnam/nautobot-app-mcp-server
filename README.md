@@ -11,6 +11,12 @@
   An <a href="https://networktocode.com/nautobot-apps/">App</a> for <a href="https://nautobot.com/">Nautobot</a>.
 </p>
 
+## Try it out
+
+This App is installed in the **Nautobot Community Sandbox** at [demo.nautobot.com](https://demo.nautobot.com/)!
+
+> For a full list of available sandbox environments, visit [networktocode.com/nautobot/sandbox-environments](https://www.networktocode.com/nautobot/sandbox-environments/).
+
 ## Overview
 
 Nautobot App MCP Server is a Nautobot plugin that exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, giving AI agents like Claude direct, tool-driven access to Nautobot's network infrastructure data. Rather than requiring an AI to parse raw API responses or navigate the Nautobot UI, the MCP server presents a curated set of typed tools — listing devices, interfaces, IP addresses, prefixes, VLANs, and locations — that AI agents can call naturally as part of their reasoning workflow.
@@ -31,38 +37,36 @@ The server exposes **13 tools** — 3 session tools and 10 core read tools. All 
 
 Session tools control progressive disclosure — what subset of tools the MCP manifest exposes to the AI for a given session.
 
-| Tool | Description | Pagination |
-|------|-------------|------------|
-| `mcp_list_tools` | List all registered tools visible to the current session (core tools always shown; app-tier tools shown if their scope is enabled or matches an active search) | No |
-| `mcp_enable_tools` | Enable an app-tier tool scope (e.g. `dcim`) or a fuzzy-search term for this session. Enabling a parent scope automatically activates all child scopes. | No |
-| `mcp_disable_tools` | Disable a tool scope (or all non-core tools if no scope is given) | No |
+| Tool | Description |
+| --- | --- |
+| `mcp_list_tools` | List all registered tools visible to the current session |
+| `mcp_enable_tools` | Enable an app-tier tool scope (e.g. `dcim`) or a search term |
+| `mcp_disable_tools` | Disable a tool scope (or all non-core tools if no scope given) |
 
 ### Core Read Tools
 
-| Tool | Description | Pagination |
-|------|-------------|------------|
-| `device_list` | List network devices with status, platform, location, role, and tenant | Yes |
-| `device_get` | Get a single device by name or UUID, with interfaces prefetched | No |
-| `interface_list` | List network interfaces, optionally filtered by device name | Yes |
-| `ipaddress_list` | List IP addresses with VRF, tenant, status, and role | Yes |
-| `prefix_list` | List network prefixes with VRF, tenant, status, and role | Yes |
-| `vlan_list` | List VLANs with site/group, status, and role | Yes |
-| `location_list` | List locations with location type, parent, and tenant | Yes |
-| `search_by_name` | Multi-model name search across devices, interfaces, IP addresses, prefixes, VLANs, and locations (AND semantics across space-separated terms) | Yes |
+| Tool | Description |
+| --- | --- |
+| `device_list` | List network devices with status, platform, location, role, and tenant |
+| `device_get` | Get a single device by name or UUID, with interfaces prefetched |
+| `interface_list` | List network interfaces, optionally filtered by device name |
+| `ipaddress_list` | List IP addresses with VRF, tenant, status, and role |
+| `prefix_list` | List network prefixes with VRF, tenant, status, and role |
+| `vlan_list` | List VLANs with site/group, status, and role |
+| `location_list` | List locations with location type, parent, and tenant |
+| `search_by_name` | Multi-model name search across devices, interfaces, IPs, prefixes, VLANs, and locations |
 
-## Architecture
+## Installation
 
-The MCP server is implemented as a [FastMCP](https://github.com/jlowin/fastmcp) server embedded in Nautobot's Django process. It runs as a standalone ASGI process on **port 8005** alongside Nautobot's Django HTTP server on port 8080. Both are started automatically via `invoke start`. The FastMCP server uses Nautobot's ORM and Token authentication infrastructure directly, so object permissions and user access control are enforced consistently whether data is accessed via the Nautobot UI or via MCP.
+Choose the path that matches your environment.
 
-## Try it out
+---
 
-This App is installed in the Nautobot Community Sandbox found over at [demo.nautobot.com](https://demo.nautobot.com/)!
+### Development (Docker Compose)
 
-> For a full list of all the available always-on sandbox environments, head over to the main page on [networktocode.com](https://www.networktocode.com/nautobot/sandbox-environments/).
+Get up and running locally in minutes.
 
-## Quick Start
-
-### 1. Install dependencies
+#### 1. Install dependencies
 
 ```shell
 poetry self add poetry-plugin-shell
@@ -70,7 +74,7 @@ poetry shell
 poetry install
 ```
 
-### 2. Build and start the Docker dev stack
+#### 2. Build and start the dev stack
 
 ```shell
 invoke build
@@ -79,25 +83,21 @@ invoke start
 
 This starts both Nautobot (at <http://localhost:8080>) and the MCP server (at <http://localhost:8005/mcp/>) in the background.
 
-### 3. Create an API token
+#### 3. Create an API token
 
 Log into Nautobot at <http://localhost:8080> as `admin` / `admin`, then navigate to **Admin → Users → Tokens** and create a new token. Copy the 40-character hex value (no prefix).
 
-### 4. Connect an MCP client
+#### 4. Connect an MCP client
 
-Point your MCP client at `http://localhost:8005/mcp/` and pass the token as:
-
+```shell
+claude mcp add --transport http \
+  --header "Authorization: Token <your-40-char-hex-token>" \
+  --scope user \
+  nautobot \
+  http://localhost:8005/mcp/
 ```
-Authorization: Token <your-40-char-hex-token>
-```
 
-See the [Usage](#usage) section below for Claude Code and Claude Desktop configuration.
-
-## Usage
-
-### Claude Code integration
-
-Add the MCP server to your Claude Code `.mcp.json` configuration file:
+Or add manually to `~/.claude.json`:
 
 ```json
 {
@@ -112,7 +112,145 @@ Add the MCP server to your Claude Code `.mcp.json` configuration file:
 }
 ```
 
-### Claude Desktop integration
+---
+
+### Production (standalone server)
+
+Install the MCP server on a running Nautobot host (e.g. at `nautobot.example.com`). The MCP server runs as a **standalone FastMCP process on port 8005**, independent of the Nautobot WSGI service.
+
+#### Prerequisites
+
+- Nautobot installed at `/opt/nautobot` (or your install path)
+- Nautobot running as the `nautobot` user
+- Python 3.12+ with `pip` in the Nautobot venv
+- Nautobot v3.0.0+ already configured and running
+
+#### 1. Build the wheel package
+
+On your **development machine**:
+
+```shell
+git clone https://github.com/latuannetnam/nautobot-app-mcp-server
+cd nautobot-app-mcp-server
+poetry install
+poetry run poetry build --format wheel
+```
+
+Copy the resulting `.whl` file to the production server:
+
+```shell
+scp dist/nautobot_app_mcp_server-*.whl nautobot@nautobot.example.com:/tmp/
+```
+
+#### 2. Install the wheel
+
+SSH into the production server, then as the `nautobot` user:
+
+```shell
+/opt/nautobot/bin/pip install --no-input /tmp/nautobot_app_mcp_server-*.whl
+```
+
+This installs the package into `/opt/nautobot/lib/python3.12/site-packages/`.
+
+#### 3. Add to `PLUGINS` in `nautobot_config.py`
+
+Edit `/opt/nautobot/nautobot_config.py` and add the app to the `PLUGINS` list:
+
+```python
+PLUGINS = [
+    # ... existing plugins ...
+    "nautobot_app_mcp_server",   # ← add this line
+]
+```
+
+#### 4. Restart Nautobot WSGI service
+
+```shell
+sudo systemctl restart nautobot.service
+```
+
+#### 5. Start the MCP server
+
+The MCP server does **not** auto-start via the WSGI service — it must be launched separately. As the `nautobot` user:
+
+```shell
+NAUTOBOT_CONFIG=/opt/nautobot/nautobot_config.py \
+  /opt/nautobot/bin/nautobot-server start_mcp_server
+```
+
+For production use, manage it via `systemd`. Create `/etc/systemd/system/nautobot-mcp.service`:
+
+```ini
+[Unit]
+Description=Nautobot MCP Server
+After=network.target nautobot.service
+
+[Service]
+User=nautobot
+Group=nautobot
+WorkingDirectory=/opt/nautobot
+Environment="NAUTOBOT_CONFIG=/opt/nautobot/nautobot_config.py"
+ExecStart=/opt/nautobot/bin/nautobot-server start_mcp_server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the service:
+
+```shell
+sudo systemctl daemon-reload
+sudo systemctl enable --now nautobot-mcp.service
+```
+
+#### 6. Connect an MCP client
+
+The MCP server will be available at `http://nautobot.example.com:8005/mcp/` (replace with your server's hostname/IP).
+
+> **Note:** If connecting from a remote machine, ensure port 8005 is open in the firewall.
+
+```shell
+claude mcp add --transport http \
+  --header "Authorization: Token <your-40-char-hex-token>" \
+  --scope user \
+  nautobot \
+  http://nautobot.example.com:8005/mcp/
+```
+
+Or add manually to `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "nautobot": {
+      "url": "http://nautobot.example.com:8005/mcp/",
+      "headers": {
+        "Authorization": "Token <your-40-char-hex-token>"
+      }
+    }
+  }
+}
+```
+
+Create the API token at **Admin → Users → Tokens**. The token is a 40-character hex string — **do not** include the `nbapikey_` prefix.
+
+---
+
+## Usage
+
+### Authentication
+
+All MCP requests must include the Nautobot API token via the `Authorization` header:
+
+```text
+Authorization: Token <40-char-hex>
+```
+
+The token is a standard Nautobot REST API key (found at **Admin → Users → Tokens**). The MCP server validates the token against Nautobot's auth backend and enforces the associated user's object permissions on every tool call.
+
+### Claude Desktop
 
 Add the server to your Claude Desktop `claude_desktop_config.json`:
 
@@ -129,16 +267,6 @@ Add the server to your Claude Desktop `claude_desktop_config.json`:
 }
 ```
 
-### Authentication
-
-All MCP requests must include the Nautobot API token via the `Authorization` header:
-
-```
-Authorization: Token <40-char-hex>
-```
-
-The token is a standard Nautobot REST API key (found at **Admin → Users → Tokens**). The MCP server validates the token against Nautobot's auth backend and enforces the associated user's object permissions on every tool call.
-
 ### Example JSON-RPC 2.0 tool calls
 
 **List devices (paginated):**
@@ -154,9 +282,7 @@ Content-Type: application/json
   "method": "tools/call",
   "params": {
     "name": "device_list",
-    "arguments": {
-      "limit": 10
-    }
+    "arguments": { "limit": 10 }
   },
   "id": 1
 }
@@ -170,9 +296,7 @@ Content-Type: application/json
   "method": "tools/call",
   "params": {
     "name": "device_get",
-    "arguments": {
-      "name_or_id": "router-01"
-    }
+    "arguments": { "name_or_id": "router-01" }
   },
   "id": 2
 }
@@ -186,15 +310,13 @@ Content-Type: application/json
   "method": "tools/call",
   "params": {
     "name": "search_by_name",
-    "arguments": {
-      "query": "edge juniper"
-    }
+    "arguments": { "query": "edge juniper" }
   },
   "id": 3
 }
 ```
 
-**Paginate through results using cursor:**
+**Paginate through results:**
 
 ```json
 {
@@ -202,14 +324,19 @@ Content-Type: application/json
   "method": "tools/call",
   "params": {
     "name": "prefix_list",
-    "arguments": {
-      "limit": 50,
-      "cursor": "eyJsYXN0X2lkIjogIjEyMyJ9"
-    }
+    "arguments": { "limit": 50, "cursor": "eyJsYXN0X2lkIjogIjEyMyJ9" }
   },
   "id": 4
 }
 ```
+
+## Architecture
+
+The MCP server is implemented as a standalone [FastMCP](https://github.com/jlowin/fastmcp) HTTP server running on **port 8005**, alongside Nautobot's Django HTTP server on port 8080. It runs as an independent ASGI process managed by `nautobot-server start_mcp_server`, not inside the Nautobot WSGI service.
+
+Both services are started automatically via `invoke start` in the development environment. In production, the WSGI service is managed by `systemd`/`uwsgi`, and the MCP server is managed by a separate `systemd` unit (see [Installation → Production](#production-standalone-server)).
+
+The FastMCP server uses Nautobot's ORM and Token authentication infrastructure directly, so object permissions and user access control are enforced consistently whether data is accessed via the Nautobot UI or via MCP.
 
 ## Development
 
@@ -219,11 +346,11 @@ Content-Type: application/json
 
 ## Documentation
 
-Full documentation for this App can be found over on the [Nautobot Docs](https://docs.nautobot.com) website:
+Full documentation for this App can be found on the [Nautobot Docs](https://docs.nautobot.com) website:
 
-- [User Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/user/app_overview/) - Overview, Using the App, Getting Started
-- [Administrator Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/admin/install/) - How to Install, Configure, Upgrade, or Uninstall the App
-- [Developer Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/dev/contributing/) - Extending the App, Code Reference, Contribution Guide
+- [User Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/user/app_overview/) — Overview, Using the App, Getting Started
+- [Administrator Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/admin/install/) — Installation, Configuration, Upgrade, Uninstall
+- [Developer Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/dev/contributing/) — Extending the App, Code Reference, Contribution Guide
 - [Release Notes / Changelog](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/admin/release_notes/)
 - [Frequently Asked Questions](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/user/faq/)
 
@@ -231,7 +358,7 @@ Full documentation for this App can be found over on the [Nautobot Docs](https:/
 
 You can find all the Markdown source for the App documentation under the [`docs`](https://github.com/latuannetnam/nautobot-app-mcp-server/tree/develop/docs) folder in this repository. For simple edits, a Markdown capable editor is sufficient: clone the repository and edit away.
 
-If you need to view the fully-generated documentation site, you can build it with [MkDocs](https://www.mkdocs.org/). A container hosting the documentation can be started using the `invoke` commands (details in the [Development Environment Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/dev/dev_environment/#docker-development-environment)) on [http://localhost:8001](http://localhost:8001). Using this container, as your changes to the documentation are saved, they will be automatically rebuilt and any pages currently being viewed will be reloaded in your browser.
+If you need to view the fully-generated documentation site, you can build it with [MkDocs](https://www.mkdocs.org/). A container hosting the documentation can be started using the `invoke` commands (details in the [Development Environment Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/dev/dev_environment/#docker-development-environment)) on [http://localhost:8001](http://localhost:8001). As your changes to the documentation are saved, they are automatically rebuilt and any pages currently being viewed are reloaded in your browser.
 
 Any PRs with fixes or improvements are very welcome!
 
