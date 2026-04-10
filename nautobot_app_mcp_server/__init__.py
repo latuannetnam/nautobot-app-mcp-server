@@ -1,11 +1,14 @@
 """App declaration for nautobot_app_mcp_server."""
 
-# Metadata is inherited from Nautobot. If not including Nautobot in the environment, this should be added
 from importlib import metadata
 
-from nautobot.apps import NautobotAppConfig
+try:
+    __version__ = metadata.version(__name__)
+except metadata.PackageNotFoundError:
+    # Fallback for development (editable install via PYTHONPATH/volume mount)
+    __version__ = "0.1.0a0"
 
-__version__ = metadata.version(__name__)
+from nautobot.apps import NautobotAppConfig
 
 
 class NautobotAppMcpServerConfig(NautobotAppConfig):
