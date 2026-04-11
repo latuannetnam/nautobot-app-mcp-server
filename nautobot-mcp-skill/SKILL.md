@@ -165,6 +165,112 @@ This helps you audit what is currently enabled without guessing.
 
 ---
 
+## Juniper Routing Tools (`netnam_cms_core.juniper` scope)
+
+| Tool | Description | Parameters | Paginated |
+|---|---|---|---|
+| juniper_static_route_list | List Juniper static routes for a device, with optional routing instance filter. | `device_name?: str`, `routing_instance_name?: str`, `limit?: int (default=25, max=1000)`, `cursor?: str` | Yes |
+| juniper_static_route_get | Get a single Juniper static route by device name + destination prefix. | `device_name: str`, `destination_prefix: str`, `routing_instance_name?: str` | No |
+
+### juniper_static_route_list
+
+List Juniper static routes for a device. Filterable by device name and optional routing instance name.
+
+**Tool name:** `juniper_static_route_list`
+
+**Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `device_name` | `string` | No | `None` | Nautobot device name to filter by |
+| `routing_instance_name` | `string` | No | `None` | Routing instance name (VRF/L3VPN table) |
+| `limit` | `integer` | No | `25` | Results per page (max 1000) |
+| `cursor` | `string` | No | `None` | Pagination cursor from previous response |
+
+**Response shape:**
+```json
+{
+  "items": [
+    {
+      "pk": "uuid-string",
+      "device": {"name": "router-01", "pk": "uuid"},
+      "destination": "10.0.0.0/8",
+      "routing_instance": {"name": "cust-vrf", "pk": "uuid"} | null,
+      "status": "Active",
+      "nexthop_count": 2,
+      "qualified_nexthop_count": 1,
+      "tags": []
+    }
+  ],
+  "cursor": "base64(pk) or null",
+  "total_count": 42,
+  "summary": null
+}
+```
+
+**Notes:**
+- `nexthop_count` and `qualified_nexthop_count` are counts only — next-hop details are not inlined in list view.
+- `destination` is the CIDR prefix string (e.g., `"10.0.0.0/8"`), not a UUID.
+- `routing_instance: null` means the global routing table.
+- Authentication via Nautobot session token is required.
+
+---
+
+### juniper_static_route_get
+
+Get a single Juniper static route by device name + destination prefix. Use `routing_instance_name` to disambiguate routes that share the same destination prefix across multiple routing instances.
+
+**Tool name:** `juniper_static_route_get`
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `device_name` | `string` | Yes | Nautobot device name |
+| `destination_prefix` | `string` | Yes | Route destination in CIDR notation (e.g., `"10.0.0.0/8"`) |
+| `routing_instance_name` | `string` | No | Routing instance name to disambiguate |
+
+**Response shape:**
+Same as `juniper_static_route_list` items, plus:
+
+```json
+{
+  "simple_next_hops": [
+    {
+      "pk": "uuid-string",
+      "ip_address": "10.0.0.1",
+      "is_active_nexthop": true,
+      "weight": 1,
+      "lsp_name": "",
+      "mpls_label": "",
+      "nexthop_type": "Router",
+      "via_interface": "ge-0/0/0"
+    }
+  ],
+  "qualified_next_hops": [
+    {
+      "pk": "uuid-string",
+      "ip_address": "10.0.0.2",
+      "interface": "ge-0/0/1",
+      "is_active_nexthop": false,
+      "weight": 1,
+      "lsp_name": "",
+      "mpls_label": "",
+      "nexthop_type": "Router",
+      "via_interface": "ge-0/0/2"
+    }
+  ]
+}
+```
+
+**Error cases:**
+- `ValueError`: No route found for the given device + destination — specify exact prefix.
+- `ValueError` (Ambiguous): Multiple routes match the device + destination without `routing_instance_name` — specify it to disambiguate.
+
+**Notes:**
+- `ip_address` values are the host part of the IP (e.g., `"10.0.0.1"`, not the full Nautobot IPAddress object).
+- Authentication via Nautobot session token is required.
+
+---
+
 ## Limitations
 
 - Write tools (create/update/delete) are not available in v1.
