@@ -156,6 +156,8 @@ class MyNautobotAppConfig(NautobotAppConfig):
     def ready(self):
         # Import the module by name — this fires @register_tool() at module scope
         # and registers the tools with MCPToolRegistry.
+        # super().ready() must be called before any code so that Django/Nautobot internals are fully registered before we attempt to import any code that may rely on them.
+        super().ready()
         from my_nautobot_app.mcp_tools import juniper_routing  # noqa: F401
 
 
