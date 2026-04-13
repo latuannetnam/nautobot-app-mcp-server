@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nautobot-app-mcp-server"
-version = "0.1.0a0"
+version = "0.1.2"
 description = "Nautobot MCP Server App"
 authors = ["Le Anh Tuan <latuannetnam@gmail.com>"]
 license = "Apache-2.0"

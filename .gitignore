@@ -312,6 +312,7 @@ public
 
 # Other
 *.env
+.envrc
 
 # Import cache — raw production data JSON (Phase 1 output, Phase 2 input)
 import_cache/
