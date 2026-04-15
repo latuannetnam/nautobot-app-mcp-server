@@ -144,5 +144,91 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 
+## v2.0 Requirements
+
+Requirements for v2.0 milestone — GraphQL MCP tool via graphene-django.
+
+### GraphQL Core
+
+- [ ] **GQL-01**: User can execute arbitrary GraphQL queries via `graphql_query` MCP tool
+- [ ] **GQL-02**: `graphql_query` uses `sync_to_async(thread_sensitive=True)` at the outer boundary
+- [ ] **GQL-03**: `graphql_query` reuses `nautobot.core.graphql.execute_query()` — no parallel schema built
+- [ ] **GQL-04**: `graphql_query` accepts `query: str` and `variables: dict | None` parameters
+- [ ] **GQL-05**: `graphql_query` returns a dict with `data` and `errors` keys
+- [ ] **GQL-06**: `graphql_query` passes `output_schema=None` to FastMCP tool decorator
+- [ ] **GQL-07**: `graphql_query` auth token resolves via `get_user_from_request()` from FastMCP request context
+
+### Schema Introspection
+
+- [ ] **GQL-08**: User can introspect GraphQL schema via `graphql_introspect` MCP tool
+- [ ] **GQL-09**: `graphql_introspect` returns GraphQL SDL string describing available Nautobot types
+
+### Security & Hardening
+
+- [ ] **GQL-10**: Query depth limit enforced (max_depth ≤ 8) to prevent deeply nested DoS
+- [ ] **GQL-11**: Query complexity limit enforced (max_complexity ≤ 1000) to prevent expensive DoS
+- [ ] **GQL-12**: GraphQL syntax errors returned as structured `errors` array, not HTTP 500s
+- [ ] **GQL-13**: Permission enforcement verified — `AnonymousUser` gets empty results, authenticated user gets filtered results
+
+### Testing
+
+- [ ] **GQL-14**: Unit tests verify auth propagates correctly to GraphQL execution context
+- [ ] **GQL-15**: Unit tests verify valid GraphQL query returns structured `{data, errors}` dict
+- [ ] **GQL-16**: Unit tests verify invalid query returns errors dict
+- [ ] **GQL-17**: Unit tests verify variables injection works correctly
+- [ ] **GQL-18**: UAT smoke test P-09 in `scripts/test_mcp_simple.py` — `graphql_query` against core Nautobot model
+- [ ] **GQL-19**: UAT full suite T-37+ in `scripts/run_mcp_uat.py` — 4+ GraphQL tests covering auth, introspection, errors
+
+### Documentation
+
+- [ ] **GQL-20**: `graphql_query` and `graphql_introspect` documented in SKILL.md with example queries
+
+### Deferred to Future
+
+| Feature | Reason |
+|---------|--------|
+| Custom GraphQL schema | Reuse `nautobot.core.graphql.schema` — parallel schema misses Nautobot's `extend_schema_type` dynamic features |
+| GraphQL as URL endpoint | MCP tool IS the interface; `/graphql/` returns 404 by design |
+| Write mutations | Focus is read-only GraphQL queries; mutations deferred |
+| DataLoader / N+1 prevention | `OptimizedNautobotObjectType` handles common cases; complex multi-hop queries can be addressed in future |
+| Multi-query execution | Single operation per request; multi-op support deferred |
+| Query result caching | TTL cache deferred to future iteration |
+| Dry-run / validation mode | `validate_only` flag deferred |
+
+---
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| GQL-01 | Phase 14 | Pending |
+| GQL-02 | Phase 14 | Pending |
+| GQL-03 | Phase 14 | Pending |
+| GQL-04 | Phase 14 | Pending |
+| GQL-05 | Phase 14 | Pending |
+| GQL-06 | Phase 14 | Pending |
+| GQL-07 | Phase 14 | Pending |
+| GQL-08 | Phase 15 | Pending |
+| GQL-09 | Phase 15 | Pending |
+| GQL-10 | Phase 16 | Pending |
+| GQL-11 | Phase 16 | Pending |
+| GQL-12 | Phase 16 | Pending |
+| GQL-13 | Phase 15 | Pending |
+| GQL-14 | Phase 14 | Pending |
+| GQL-15 | Phase 14 | Pending |
+| GQL-16 | Phase 14 | Pending |
+| GQL-17 | Phase 14 | Pending |
+| GQL-18 | Phase 17 | Pending |
+| GQL-19 | Phase 17 | Pending |
+| GQL-20 | Phase 17 | Pending |
+
+**Coverage:**
+
+- v2.0 requirements: 20 total
+- Mapped to phases: 20 (tentative — confirmed by roadmapper)
+- Unmapped: 0 ✓
+
+---
+
 *Requirements defined: 2026-04-05*
-*Last updated: 2026-04-05 after research synthesis*
+*Last updated: 2026-04-15 — v2.0 GraphQL MCP Tool milestone started*
