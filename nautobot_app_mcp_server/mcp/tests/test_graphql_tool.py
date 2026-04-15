@@ -10,8 +10,8 @@ from django.contrib.auth.models import AnonymousUser
 from django.db import connection
 from django.test import TestCase
 
-from nautobot_app_mcp_server.mcp.tools import graphql_tool
 from nautobot_app_mcp_server.mcp.tests.test_auth import _make_mock_ctx
+from nautobot_app_mcp_server.mcp.tools import graphql_tool
 
 
 def _create_token(user) -> object:
@@ -243,6 +243,7 @@ class GraphQLQueryHandlerTestCase(TestCase):
         self.assertIsNone(result["data"])
         self.assertEqual(result["errors"][0]["message"], "Authentication required")
 
+<<<<<<< HEAD
     @patch("nautobot.core.graphql.execute_query")
     def test_anonymous_user_empty_query_results(self, mock_execute):
         """GQL-13: AnonymousUser triggers ValueError from execute_query → empty result.
@@ -295,3 +296,275 @@ class GraphQLQueryHandlerTestCase(TestCase):
         self.assertIsNone(result["errors"])
         self.assertNotEqual(result["data"]["devices"], [])
         self.assertEqual(result["data"]["devices"][0]["name"], "router-01")
+
+
+class GraphQLIntrospectHandlerTestCase(TestCase):
+    """Test the graphql_introspect MCP tool handler (GQL-08, GQL-09)."""
+
+    def _get_or_create_superuser(self):
+        """Return an existing superuser or create one for test fixtures."""
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        user = User.objects.filter(is_superuser=True).first()
+        if not user:
+            user = User.objects.create_superuser(
+                username="testadmin",
+                email="admin@test.local",
+                password="testpass",  # noqa: S106
+            )
+        return user
+
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
+    )
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect"
+    )
+    def test_introspect_returns_sdl_string(self, mock_sync, mock_get_user):
+        """GQL-09: graphql_introspect returns a multi-line SDL string.
+
+        Patches both the auth layer and the sync helper at the module level
+        (where the names are bound at import time). The mock returns a valid
+        SDL fragment that the handler passes through unchanged.
+        """
+        user = self._get_or_create_superuser()
+        token = _create_token(user)
+
+        mock_sdl = (
+            'type Query {\n'
+            '  devices: [Device]\n'
+            '}\n'
+            'type Device {\n'
+            '  name: String\n'
+            '}\n'
+        )
+        mock_sync.return_value = mock_sdl
+        mock_get_user.return_value = user
+
+        try:
+            ctx = _make_mock_ctx(
+                authorization=f"Token {token.key}",
+                token_key_to_user={token.key: user},
+            )
+            result = AsyncToSync(graphql_tool._graphql_introspect_handler)(ctx)
+
+            self.assertIsInstance(result, str)
+            self.assertIn("type Query", result)
+            self.assertIn("Device", result)
+        finally:
+            token.delete()
+
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect"
+    )
+    def test_introspect_sdl_valid(self, mock_sync):
+        """GQL-09: Returned SDL can be parsed by build_schema without GraphQLError.
+
+        D-05 from RESEARCH.md: build_schema raises GraphQLError on malformed SDL.
+        A well-formed SDL string parses successfully.
+        """
+        from graphql import GraphQLError, build_schema
+
+        mock_sdl = (
+            "type Query {\n"
+            "  devices: [Device]\n"
+            "}\n"
+            "type Device {\n"
+            "  name: String\n"
+            "}\n"
+        )
+        mock_sync.return_value = mock_sdl
+
+        result = graphql_tool._sync_graphql_introspect()
+
+        # Must not raise GraphQLError — valid SDL parses successfully
+        try:
+            build_schema(result)
+        except GraphQLError:
+            self.fail("SDL from _sync_graphql_introspect is not a valid GraphQL schema")
+
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
+    )
+    def test_introspect_raises_on_anonymous(self, mock_get_user):
+        """GQL-08: Introspection requires auth — anonymous raises ValueError.
+
+        When get_user_from_request returns None (no token), the handler raises
+        ValueError("Authentication required"). FastMCP converts this to a
+        structured tool error response.
+        """
+        mock_get_user.return_value = None
+
+        ctx = _make_mock_ctx(authorization=None)
+
+        with self.assertRaises(ValueError) as ctx_:
+            AsyncToSync(graphql_tool._graphql_introspect_handler)(ctx)
+        self.assertIn("Authentication required", str(ctx_.exception))
+
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
+    )
+    def test_auth_required_resolves_user(self, mock_get_user):
+        """GQL-08: Auth token is resolved before the sync boundary is crossed.
+
+        Verifies that get_user_from_request is called once and its result
+        is used (not re-checked inside the sync helper).
+        """
+        user = self._get_or_create_superuser()
+        token = _create_token(user)
+
+        mock_get_user.return_value = user
+
+        try:
+            ctx = _make_mock_ctx(
+                authorization=f"Token {token.key}",
+                token_key_to_user={token.key: user},
+            )
+            # Patch the sync helper to avoid needing Nautobot schema in unit test
+            with patch(
+                "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect",
+                return_value="type Query {\n  test: String\n}\n",
+            ):
+                result = AsyncToSync(graphql_tool._graphql_introspect_handler)(ctx)
+
+            mock_get_user.assert_called_once()
+            self.assertIsInstance(result, str)
+        finally:
+            token.delete()
+
+class GraphQLIntrospectHandlerTestCase(TestCase):
+    """Test the graphql_introspect MCP tool handler (GQL-08, GQL-09)."""
+
+    def _get_or_create_superuser(self):
+        """Return an existing superuser or create one for test fixtures."""
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        user = User.objects.filter(is_superuser=True).first()
+        if not user:
+            user = User.objects.create_superuser(
+                username="testadmin",
+                email="admin@test.local",
+                password="testpass",  # noqa: S106
+            )
+        return user
+
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
+    )
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect"
+    )
+    def test_introspect_returns_sdl_string(self, mock_sync, mock_get_user):
+        """GQL-09: graphql_introspect returns a multi-line SDL string.
+
+        Patches both the auth layer and the sync helper at the module level
+        (where the names are bound at import time). The mock returns a valid
+        SDL fragment that the handler passes through unchanged.
+        """
+        user = self._get_or_create_superuser()
+        token = _create_token(user)
+
+        mock_sdl = (
+            'type Query {\n'
+            '  devices: [Device]\n'
+            '}\n'
+            'type Device {\n'
+            '  name: String\n'
+            '}\n'
+        )
+        mock_sync.return_value = mock_sdl
+        mock_get_user.return_value = user
+
+        try:
+            ctx = _make_mock_ctx(
+                authorization=f"Token {token.key}",
+                token_key_to_user={token.key: user},
+            )
+            result = AsyncToSync(graphql_tool._graphql_introspect_handler)(ctx)
+
+            self.assertIsInstance(result, str)
+            self.assertIn("type Query", result)
+            self.assertIn("Device", result)
+        finally:
+            token.delete()
+
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect"
+    )
+    def test_introspect_sdl_valid(self, mock_sync):
+        """GQL-09: Returned SDL can be parsed by build_schema without GraphQLError.
+
+        D-05 from RESEARCH.md: build_schema raises GraphQLError on malformed SDL.
+        A well-formed SDL string parses successfully.
+        """
+        from graphql import GraphQLError, build_schema
+
+        mock_sdl = (
+            "type Query {\n"
+            "  devices: [Device]\n"
+            "}\n"
+            "type Device {\n"
+            "  name: String\n"
+            "}\n"
+        )
+        mock_sync.return_value = mock_sdl
+
+        result = graphql_tool._sync_graphql_introspect()
+
+        # Must not raise GraphQLError — valid SDL parses successfully
+        try:
+            build_schema(result)
+        except GraphQLError:
+            self.fail("SDL from _sync_graphql_introspect is not a valid GraphQL schema")
+
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
+    )
+    def test_introspect_raises_on_anonymous(self, mock_get_user):
+        """GQL-08: Introspection requires auth — anonymous raises ValueError.
+
+        When get_user_from_request returns None (no token), the handler raises
+        ValueError("Authentication required"). FastMCP converts this to a
+        structured tool error response.
+        """
+        mock_get_user.return_value = None
+
+        ctx = _make_mock_ctx(authorization=None)
+
+        with self.assertRaises(ValueError) as ctx_:
+            AsyncToSync(graphql_tool._graphql_introspect_handler)(ctx)
+        self.assertIn("Authentication required", str(ctx_.exception))
+
+    @patch(
+        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
+    )
+    def test_auth_required_resolves_user(self, mock_get_user):
+        """GQL-08: Auth token is resolved before the sync boundary is crossed.
+
+        Verifies that get_user_from_request is called once and its result
+        is used (not re-checked inside the sync helper).
+        """
+        user = self._get_or_create_superuser()
+        token = _create_token(user)
+
+        mock_get_user.return_value = user
+
+        try:
+            ctx = _make_mock_ctx(
+                authorization=f"Token {token.key}",
+                token_key_to_user={token.key: user},
+            )
+            # Patch the sync helper to avoid needing Nautobot schema in unit test
+            with patch(
+                "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect",
+                return_value="type Query {\n  test: String\n}\n",
+            ):
+                result = AsyncToSync(graphql_tool._graphql_introspect_handler)(ctx)
+
+            mock_get_user.assert_called_once()
+            self.assertIsInstance(result, str)
+        finally:
+            token.delete()
+>>>>>>> 1ce0f41 (feat(15): add graphql_introspect MCP tool returning GraphQL SDL)

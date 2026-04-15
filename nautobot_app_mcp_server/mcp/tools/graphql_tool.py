@@ -65,3 +65,36 @@ def _sync_graphql_query(query: str, variables: dict | None, user) -> dict[str, A
         # user was None — execute_query requires request or user
         return {"data": None, "errors": [{"message": "Authentication required"}]}
     return result.formatted
+
+
+@register_tool(
+    name="graphql_introspect",
+    description=(
+        "Return the GraphQL schema as an SDL string. "
+        "Auth token required — anonymous callers receive a tool error."
+    ),
+    tier=TOOLS_TIER,
+    scope=TOOLS_SCOPE,
+)
+async def _graphql_introspect_handler(ctx: ToolContext) -> str:
+    """Return the GraphQL SDL string for Nautobot's schema.
+
+    Returns:
+        str: Multi-line GraphQL SDL describing all available types and fields.
+
+    Raises:
+        ValueError: If no authentication token is provided.
+    """
+    user = await get_user_from_request(ctx)
+    if user is None:
+        raise ValueError("Authentication required")
+    return await sync_to_async(_sync_graphql_introspect, thread_sensitive=True)()
+
+
+def _sync_graphql_introspect() -> str:
+    """Synchronous SDL generator — accesses Nautobot's graphene Schema."""
+    from graphene_django.settings import graphene_settings
+    from graphql import print_schema
+
+    schema = graphene_settings.SCHEMA
+    return print_schema(schema.graphql_schema)
