@@ -63,14 +63,34 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 
 ---
 
-## Current Milestone: v2.0 — Planning Pending
+## Current Milestone: v2.0 GraphQL MCP Tool
 
-**Candidate features:**
-- Write tools (create/update/delete)
-- Redis session backend for horizontal scaling
+**Goal:** Add a GraphQL MCP tool using graphene-django to query Nautobot data, with UAT tests following the same pattern as `scripts/test_mcp_simple.py`.
 
-**Next step:** `/gsd-new-milestone`
+**Target features:**
+- GraphQL MCP tool (graphene-django) to query Nautobot data via GraphQL
+- UAT tests following `scripts/test_mcp_simple.py` pattern
+- GraphQL endpoint integration with MCP server
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
 
 ---
 
-*Last updated: 2026-04-07 after v1.2.0 milestone shipped*
+*Last updated: 2026-04-15 — v2.0 milestone started*
