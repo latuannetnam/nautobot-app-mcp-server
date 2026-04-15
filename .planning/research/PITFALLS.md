@@ -1,606 +1,389 @@
-# Pitfalls Research — Adding a Separate-Process MCP Server to Nautobot Apps
+# Pitfalls Research — GraphQL MCP Tool
 
-**Domain:** Nautobot App + FastMCP separate-process architecture migration
-**Researched:** 2026-04-05
-**Confidence:** HIGH
-**Driven by:** `docs/dev/ARCHITECTURE.md` (standalone verification), `docs/dev/mcp-implementation-analysis.md`, `ROADMAP.md`, current codebase state
+<research_type>Project Research — Pitfalls for GraphQL MCP tool.</research_type>
+
+<summary>
+Adding a graphene-django GraphQL layer to this standalone FastMCP process introduces risks around async/sync boundaries, auth middleware gaps, Django setup sequencing, URL routing assumptions, schema introspection, and N+1 query performance. Careful attention to thread-sensitive ORM calls, explicit auth propagation, and treating GraphQL as an MCP tool rather than a URL endpoint is required to avoid runtime failures and security holes.
+</summary>
 
 ---
 
-## Critical Pitfalls
+## Pitfalls Specific to This Project
 
-### Pitfall 1: `nautobot.setup()` Called After Model Imports
+### P1: `sync_to_async` Boundary in Graphene Resolvers
 
 **What goes wrong:**
-The MCP server fails to start with `RuntimeError: Django wasn't set up yet. Run nautobot.setup() first.`
-
-If `nautobot.setup()` is called inside `__init__.py` at import time, and `__init__.py` is imported before Django is initialized (e.g., by another plugin's `ready()` hook that triggers a side-effect import), the setup call happens too early. Alternatively, if model imports happen before `nautobot.setup()`:
-
-```python
-# WRONG — model imported before setup
-from nautobot.dcim.models import Device  # ← raises if Django not set up
-nautobot.setup()
-```
+GraphQL resolvers in graphene-django run synchronously. If they access the Django ORM directly from a FastMCP async thread, they fail with `SynchronousOnlyOperation: You cannot call this from an async context`.
 
 **Why it happens:**
-`nautobot.setup()` checks `django._setup` (a sentinel boolean). If any model class or Django model metaclass is accessed before this flag is set, Django raises `SynchronousOnlyOperation`. The Python import system means any `from x.models import Y` triggers Django model class construction, which requires `django.setup()` to have already run.
+FastMCP tool handlers are `async def`. The ORM call is synchronous. This is the same class of issue already documented in the project's Gotchas — the project has correctly handled it in existing tools, but graphene-django's `DjangoObjectType` field resolvers also run synchronously. Any custom resolver method that touches the ORM triggers the error.
+
+**How it manifests:**
+```python
+# This raises SynchronousOnlyOperation inside a graphene resolver
+class DeviceType(DjangoObjectType):
+    class Meta:
+        model = Device
+
+    def resolve_location(self, info):
+        return self.location.name  # ← Django model access inside resolver
+```
 
 **How to avoid:**
-Follow the reference architecture's `main.py` pattern — `nautobot.setup()` at the **top of the entry point**, before any relative imports from the package:
-
+Wrap the entire `schema.execute()` call at the MCP tool boundary with a single `sync_to_async(thread_sensitive=True)` call. All resolver tree traversal then happens on Django's main thread:
 ```python
-# main.py — entry point, first line of user-facing code
+@mcp.tool()
+async def graphql_query(ctx, query: str, variables: str = None):
+    @sync_to_async
+    def _execute():
+        kwargs = {"query": query}
+        if variables:
+            kwargs["variable_values"] = json.loads(variables)
+        kwargs["context_value"] = {"request": _build_request(ctx)}
+        return schema.execute(**kwargs)
+    result = await _execute()
+    return {"data": result.data, "errors": [str(e) for e in result.errors] if result.errors else None}
+```
+
+**Warning signs:**
+- `SynchronousOnlyOperation` in resolver traceback
+- Logs show resolver execution before `sync_to_async` boundary
+
+**Phase:** Phase 1 — Tool scaffold
+
+---
+
+### P2: Auth State Not Propagated into GraphQL Execution Context
+
+**What goes wrong:**
+The existing session tools store the authenticated user in FastMCP's MemoryStore (`mcp:cached_user`). GraphQL resolvers run outside the FastMCP `ctx` scope — they cannot call `ctx.get_state()`. If resolvers call `model.objects.restrict(user, ...)`, they get `AnonymousUser` restrictions even with a valid token.
+
+**Why it happens:**
+`ScopeGuardMiddleware` runs at the MCP tool-call boundary. Once inside `schema.execute()`, there is no MCP session context. `graphene.execute()` does not automatically forward HTTP headers or user identity.
+
+**How it manifests:**
+- Valid token passed to MCP tool
+- `mcp_enable_tools` works
+- GraphQL query returns empty results for objects the user should see
+- `AnonymousUser.restrict()` silently filters everything
+
+**How to avoid:**
+Resolve the user **before** calling `schema.execute()`, then pass it into the GraphQL context:
+```python
+async def graphql_query(ctx, query: str, variables: str = None):
+    # Resolve user from session state (already cached by previous auth)
+    user_pk = ctx.request_context.session.get("mcp:cached_user")
+    user = await _get_user(user_pk)  # sync_to_async lookup
+    context = {"request": _build_django_request(ctx), "user": user}
+    result = await _execute(query, context_value=context)
+```
+
+Then in resolvers, access `info.context.get("user")` instead of `info.context["request"].user`.
+
+**Phase:** Phase 1 — Auth integration
+
+---
+
+### P3: Raw Query Bypasses Scope Guard Authorization
+
+**What goes wrong:**
+If the GraphQL tool exposes a free-form query parameter (client sends arbitrary GQL), `ScopeGuardMiddleware` only sees the single tool call `graphql_query`. It cannot inspect which fields the inner query requests. Scopes are enforced at the MCP boundary, not at the GraphQL field level.
+
+**Why it happens:**
+`ScopeGuardMiddleware.checkScopes()` runs on the MCP tool name, not the GraphQL query AST. A client with `scope="dcim"` can call `graphql_query(query="{ ipam_aggregates { id } }")` and retrieve IPAM data through a DCIM-scope session.
+
+**How it manifests:**
+- Client with narrow scope retrieves data from a type outside their scope
+- No error raised at MCP layer
+- GraphQL resolves normally
+
+**How to avoid (pick one):**
+- **Pre-approved queries only:** Design named tools per operation (`graphql_list_devices`, `graphql_get_device`) — each is a separate MCP tool with its own scope guard. Scopes map to tools.
+- **Query allowlist:** Validate the query AST against an allowlist of permitted field paths for the current session's scopes before execution.
+- **Schema-level middleware:** Wrap the graphene schema with a middleware that checks `info.context["user"]` permissions per field and raises `GraphQLError` for unauthorized fields.
+
+**Phase:** Phase 1 — Architecture decision + Phase 2 — Authorization enforcement
+
+---
+
+### P4: Django App / `django.setup()` Not Called Before Schema Import
+
+**What goes wrong:**
+`ImportError: cannot import name 'schema'` or fields/models not appearing in the GraphQL schema.
+
+**Why it happens:**
+Graphene-django auto-generates `schema_django` by introspecting `INSTALLED_APPS` models. This requires `django.setup()` to have run. The standalone FastMCP process may call `nautobot.setup()` but if the GraphQL schema module is imported before that call completes, the schema will be empty or raise import errors.
+
+**How it manifests:**
+- Schema has no `Query` or `Mutation` types
+- `DjangoObjectType`-registered fields return empty
+- `ImportError` on `schema` import during module load
+
+**How to avoid:**
+Ensure `nautobot.setup()` (which calls `django.setup()`) runs at the **very top** of the server entry point, before any graphene or schema imports:
+```python
+# Entry point — FIRST
 import nautobot
-nautobot.setup()  # Must be the very first thing
+nautobot.setup()  # django.setup() fires here
 
-# Only NOW safe to import models
-from nautobot.dcim.models import Device  # ✅
+# NOW safe
+from .graphql.schema import schema  # ✅
 ```
 
-If `__init__.py` must call `nautobot.setup()`, guard it to run exactly once:
-```python
-# __init__.py — only run if called as entry point
-import sys
-if __name__ == "__main__" or getattr(sys, '_nautobot_mcp_setup', False):
-    import nautobot
-    nautobot.setup()
-```
-
-**Warning signs:**
-- `RuntimeError: Django wasn't set up yet` at import or startup
-- Model import errors in the traceback when running `nautobot-server start_mcp_server`
-- Container fails to start with no useful logs (Django import errors swallowed)
-
-**Phase to address:** Phase 0 (Project Setup)
+**Phase:** Phase 1 — Server bootstrap
 
 ---
 
-### Pitfall 2: `DJANGO_SETTINGS_MODULE` / `NAUTOBOT_CONFIG` Misconfigured
+### P5: GraphQL as URL Endpoint vs MCP Tool
 
 **What goes wrong:**
-`nautobot.setup()` silently uses the wrong config (or falls back to a minimal Django settings) and the MCP server connects to the wrong database — or a database with no schema at all (empty tables). Tools return data from a different Nautobot instance, or fail with `relation does not exist`.
+Attempting to add a `/graphql/` Django-style URL route to the standalone FastMCP process. Requests return 404 because FastMCP's `StreamableHTTPSessionManager` only routes MCP protocol messages, not arbitrary URLs.
 
 **Why it happens:**
-`nautobot.setup()` reads `NAUTOBOT_CONFIG` env var, falling back to `~/.nautobot/nautobot_config.py`. If neither is set, it falls back to Django defaults, which connect to `localhost:5432` with no schema. The MCP server silently starts against the wrong DB.
+The project already uses a custom FastMCP HTTP transport — there is no Django URL router in the standalone process. A `/graphql/` URL would require adding a separate ASGI app or route handler, which is not the natural architecture.
 
-Production Docker deployment also needs `NAUTOBOT_CONFIG` pointing to the same `nautobot_config.py` that Nautobot itself uses.
-
-**How to avoid:**
-Document the required env vars explicitly and validate them at startup:
-```bash
-# Required env vars for MCP server
-NAUTOBOT_CONFIG=/opt/nautobot/nautobot_config.py
-NAUTOBOT_DB_HOST=nautobot-db        # Must match Nautobot's DB host
-NAUTOBOT_DB_PORT=5432
-NAUTOBOT_DB_NAME=nautobot
-NAUTOBOT_DB_USER=nautobot
-NAUTOBOT_DB_PASSWORD=<from nautobot_config.py>
-```
-
-Validate at startup before calling `nautobot.setup()`:
-```python
-import os
-config_path = os.environ.get("NAUTOBOT_CONFIG", "~/.nautobot/nautobot_config.py")
-if not os.path.exists(os.path.expanduser(config_path)):
-    raise RuntimeError(f"NAUTOBOT_CONFIG not found at {config_path}")
-```
-
-**Warning signs:**
-- MCP server starts but returns no data — DB has no schema
-- `relation "dcim_device" does not exist` errors
-- Data returned by MCP doesn't match Nautobot UI data
-- `nautobot-setup` health check passes but DB queries fail
-
-**Phase to address:** Phase 0 (Project Setup) — Docker Compose env var wiring
-
----
-
-### Pitfall 3: `post_migrate` Signal Never Fires (Plugin Tools Not Registered)
-
-**What goes wrong:**
-Third-party Nautobot apps call `register_mcp_tool()` from their `AppConfig.ready()` hooks, but in the standalone process those apps are loaded via `django.setup()` (from `nautobot_config.py`'s `INSTALLED_APPS`) without any `post_migrate` signal firing. Tool registrations are silently missing.
-
-**Why it happens:**
-`nautobot_database_ready` is sent by Nautobot's `nautobot.core.management.commands.post_migrate` signal hook. When the MCP server runs `django.setup()` directly (not via `nautobot-server`), no `migrate` command is run, so `post_migrate` never fires. Additionally, Django's `post_migrate` signal requires the `django migrations` app, not the `nautobot.core.management.commands.post_migrate` subclass.
-
-The reference architecture (ARCHITECTURE.md §5.7) notes this explicitly: "The `post_migrate` signal that fires `nautobot_database_ready` is **not triggered** by standalone `django.setup()`."
+**How it manifests:**
+- `curl http://localhost:8005/graphql/` → 404
+- Documentation suggests GraphQL is at a URL endpoint
+- AI agent tries to GET/POST to `/graphql/` directly
 
 **How to avoid:**
-Use a startup discovery mechanism instead of relying on `post_migrate`:
-```python
-# main.py or server.py — called after nautobot.setup() + django.setup()
-def discover_plugin_tools():
-    """Called at startup after nautobot.setup(). Discovers plugin mcp_tools modules."""
-    from django.apps import apps
-    for app_config in apps.get_app_configs():
-        if app_config.name.startswith(("django.", "nautobot.core")):
-            continue
-        try:
-            mcp_module = importlib.import_module(f"{app_config.name}.mcp_tools")
-            # mcp_module.register_tools(mcp) — convention: module exposes register function
-        except ImportError:
-            continue
-```
-
-Or keep the `MCPToolRegistry` as an in-process registry that third-party apps register into via a conventional import-time call, but call `nautobot.setup()` first in the entry point so Django is ready.
-
-**Warning signs:**
-- `mcp_list_tools` returns only core tools, no third-party plugin tools
-- Third-party app's `ready()` hook fires but its tools don't appear
-- `MCPToolRegistry.get_all()` returns fewer tools than expected
-
-**Phase to address:** Phase 2 (Tool Registration Refactor)
-
----
-
-### Pitfall 4: In-Memory Sessions Lost on Multi-Worker Deployment
-
-**What goes wrong:**
-When running `uvicorn --workers 4`, sessions are stored in each worker's in-memory `StreamableHTTPSessionManager` dict. If a client is routed to worker 1 for request 1, then routed to worker 2 for request 2, the session state from worker 1 is gone. `mcp_enable_tools` on request 1 appears to work, but `mcp_list_tools` on request 2 shows nothing.
-
-**Why it happens:**
-FastMCP's `StreamableHTTPSessionManager` stores sessions in `_server_instances: dict[str, StreamableHTTPServerTransport]`. Each uvicorn worker is a separate Python process with its own memory space. Session dict is not shared across processes.
-
-**How to avoid:**
-For v1 (single-worker acceptable): document `--workers 1` as a hard requirement for session persistence:
-```bash
-# v1: single worker for session persistence
-uvicorn nautobot_app_mcp_server.main:app --host 0.0.0.0 --port 8005 --workers 1
-```
-
-For v2 (multi-worker): implement Redis-backed session storage by subclassing `StreamableHTTPSessionManager` or wrapping the session dict access:
-```python
-# v2 approach — store session state in Redis
-import redis
-_redis = redis.Redis.from_url(os.environ["REDIS_URL"])
-
-async def get_session_state(session_id: str) -> dict:
-    data = _redis.get(f"mcp:session:{session_id}")
-    return json.loads(data) if data else {}
-```
-
-**Warning signs:**
-- Sessions work on first request, fail on second (worker switched)
-- `mcp_enable_tools` result confirmed but next request shows no scope enabled
-- Works with `--workers 1`, broken with `--workers 4`
-
-**Phase to address:** Phase 0 (document as known limitation) + Phase 6 (UAT validation)
-
----
-
-### Pitfall 5: ORM Calls Without `sync_to_async` Raise `SynchronousOnlyOperation`
-
-**What goes wrong:**
-Async tool handlers call Django ORM directly:
+Implement GraphQL as an MCP tool (the natural pattern for this architecture):
 ```python
 @mcp.tool()
-async def device_list(ctx, limit=25):
-    devices = Device.objects.all()  # ← SynchronousOnlyOperation
+async def graphql_query(query: str, variables: str = None, operation_name: str = None):
+    """Execute a GraphQL query against Nautobot's schema."""
 ```
-The error only surfaces at runtime — not on module import, not in unit tests that mock the ORM.
+This preserves the existing authz pattern, session management, and tool discovery mechanism.
+
+**Phase:** Phase 1 — Architecture decision
+
+---
+
+### P6: `DjangoObjectType` Meta Thread Issues Under `thread_sensitive=True`
+
+**What goes wrong:**
+`DjangoObjectType` uses the Django model's `pk` as its identity and may cache instances using thread-local state. Under `thread_sensitive=True`, the async-to-sync transition in `sync_to_async` does not guarantee the same thread for the entire resolver tree.
 
 **Why it happens:**
-Django's `SyncToAsyncWrapper` raises `SynchronousOnlyOperation` when a synchronous ORM call is made from inside an async function that was not explicitly wrapped with `sync_to_async`. FastMCP tool handlers are `async def`. The ORM call is synchronous. The error is raised at the ORM call site.
+`sync_to_async(thread_sensitive=True)` runs the wrapped function on Django's main thread pool, but each call may pick a different thread from the pool. `DjangoObjectType`'s internal `get_node()` method may resolve an object by ID on one thread, then hydrate field values on another — causing field data to be missing or stale.
 
-This pattern is already correctly implemented in the current embedded code (Phase 3 had `PAGE-05` requirement), but when migrating to standalone, the `sync_to_async` wrapper pattern must be maintained and not accidentally removed during refactoring.
+**How it manifests:**
+- Some device fields resolve correctly, others return `None`
+- Inconsistent data across repeated identical queries
+- No error raised, just silent `None` values
 
 **How to avoid:**
-Every ORM call inside an async tool handler must be wrapped:
+- Use `sync_to_async` at the **outer tool boundary only** — not per resolver
+- Ensure the entire `schema.execute()` call is a single `sync_to_async` call so all resolver tree execution happens in one thread context
+- Test under concurrent load
+
+**Phase:** Phase 2 — Concurrency testing
+
+---
+
+### P7: N+1 Query Problem in GraphQL Resolvers
+
+**What goes wrong:**
+A GraphQL query like `{ devices { location { site { name } } } }` generates N+1 ORM queries in naive graphene-django resolvers if `select_related` or `prefetch_related` are not configured.
+
+**Why it happens:**
+Each `DjangoObjectType` field resolver issues a separate ORM query for related objects. For a nested query returning 100 devices with 2 levels of relations, this can generate 200+ queries.
+
+**How it manifests:**
+- GraphQL queries timeout or are very slow
+- DB query count in logs is disproportionately high vs result count
+- List tools (existing) are optimized with `select_related`, but GraphQL resolvers are not
+
+**How to avoid:**
+Configure `DjangoObjectType` with `only` and `exclude` fields, and use `prefetch_related` in the root resolver's queryset:
+```python
+class DeviceNode(DjangoObjectType):
+    class Meta:
+        model = Device
+        fields = "__all__"
+        extras = {"prefetch_related": lambda info: ["location__site"]}
+```
+Alternatively, use DataLoader patterns to batch ID lookups.
+
+**Phase:** Phase 2 — Performance
+
+---
+
+### P8: No Schema Discovery for AI Agents
+
+**What goes wrong:**
+AI agents using the MCP server cannot discover what types, fields, or operations the GraphQL schema exposes. The MCP tool registry shows `graphql_query` but not what queries are valid.
+
+**Why it happens:**
+GraphQL schemas are self-describing via introspection. However, FastMCP's tool discovery returns only the tool signature, not the schema SDL. Agents must either guess fields or have the schema SDL provided out-of-band.
+
+**How it manifests:**
+- Agent submits `{ devices { name } }` — works by coincidence
+- Agent does not know available fields on `Device` type
+- Tool is underutilized because schema is opaque to the agent
+
+**How to avoid:**
+Add a companion tool or session tool:
 ```python
 @mcp.tool()
-async def device_list(ctx, limit=25):
-    @sync_to_async
-    def _query():
-        return list(Device.objects.select_related("status").all()[:limit])
-    devices = await _query()
-    return [serialize(d) for d in devices]
+async def graphql_introspect(ctx) -> str:
+    """Return the GraphQL schema SDL for discovery."""
+    import graphql
+    schema_sdl = graphql.get_schema(schema)
+    return schema_sdl
 ```
+Document the output and encourage agents to call it first.
 
-Enforce via code review checklist item: "Every ORM call in `tools/` is inside a `@sync_to_async`-wrapped inner function."
-
-**Warning signs:**
-- `SynchronousOnlyOperation: You cannot call this from an async context` at runtime
-- Only surfaces with real ORM (unit tests mock it away)
-- Most likely to appear in `search_by_name` which does multi-model queries
-
-**Phase to address:** Phase 2 (Tool Registration Refactor) — re-verify all tool implementations
+**Phase:** Phase 2 — Discovery UX
 
 ---
 
-### Pitfall 6: `contextvars.ContextVar` and `_mcp_tool_state` Monkey-Patching Broken in Standalone
+### P9: `post_migrate` Signal Not Firing for Schema Registration
 
 **What goes wrong:**
-The embedded code uses `ctx.request_context._mcp_tool_state` (monkey-patching the RequestContext dataclass) and `_cached_user` on the same dataclass. In the standalone process, FastMCP runs in its own event loop without the Django `RequestContext` wrapper that the embedded bridge was creating. These patterns may not work the same way.
+In the standalone FastMCP process, `post_migrate` does not fire (already documented in the existing PITFALLS.md). If a graphene-django schema is built dynamically based on installed apps or if `graphene_django.DjangoSchema` is created inside a `post_migrate` signal handler, the schema is never built.
 
 **Why it happens:**
-In the embedded architecture, `view.py` builds a custom `RequestContext` object and passes it through the ASGI call chain. The standalone FastMCP process uses its own `Server.request_context` (`contextvars.ContextVar`) which holds FastMCP's internal `RequestContext` dataclass — a different type, from `mcp.server.lowlevel`.
-
-Specifically:
-- `ctx.request_context._mcp_tool_state` — assumes the `request_context` is the embedded bridge's custom type
-- `ctx.request_context._cached_user` — same assumption
-
-In standalone FastMCP, `ctx.request_context` is `mcp.server.lowlevel.RequestContext` (different shape).
+Same root cause as existing Pitfall 3: `nautobot_database_ready` / `post_migrate` only fires during `nautobot-server migrate`, not during standalone `django.setup()`. The GraphQL schema generation should be a startup action, not a signal handler.
 
 **How to avoid:**
-Replace monkey-patched dataclass attributes with session dict access (which IS cross-version compatible):
+Build the schema at server startup, after `nautobot.setup()` completes, as a module-level or startup-initialized singleton — not in a signal handler:
 ```python
-# Old (embedded): monkey-patch RequestContext dataclass
-ctx.request_context._cached_user = user
-cached = ctx.request_context._cached_user
-
-# New (standalone): use FastMCP session dict (always available, always dict-like)
-ctx.request_context.session["cached_user"] = user
-cached = ctx.request_context.session.get("cached_user")
+# graphql/schema.py — module level, built after django.setup()
+def get_schema():
+    if not hasattr(get_schema, "_instance"):
+        get_schema._instance = graphene.Schema(query=Query)
+    return get_schema._instance
 ```
 
-For progressive disclosure, the session dict approach (already in `session_tools.py` `MCPSessionState.from_session()`) is already correct. The fix is to remove the `_get_tool_state()` monkey-patch helper entirely and access the session dict directly.
-
-**Warning signs:**
-- `AttributeError: 'RequestContext' object has no attribute '_mcp_tool_state'`
-- `AttributeError: 'RequestContext' object has no attribute '_cached_user'`
-- Progressive disclosure tools return wrong tool list
-
-**Phase to address:** Phase 3 (Session State Simplification) — replace monkey-patching with session dict
+**Phase:** Phase 1 — Tool scaffold
 
 ---
 
-### Pitfall 7: Auth Token Read from Wrong Place (MCP vs Django Request)
+### P10: Token Auth Repeatedly Hit DB Per Request
 
 **What goes wrong:**
-Auth extracts the token from `ctx.request_context.request.headers` — which in the embedded bridge came from the MCP HTTP request, but in standalone FastMCP, `request_context.request` is set by FastMCP's own HTTP handler. These should be the same thing, but if any middleware or proxy modifies headers before FastMCP sees them, the token may be lost or overwritten.
+Each GraphQL query re-authenticates the user by looking up the token in the DB. If the schema resolver tree makes many ORM calls already, adding a per-request token lookup compounds DB load.
 
 **Why it happens:**
-In the embedded architecture, the Django view bridges the HTTP request into ASGI, building headers from `django_request.headers`. In standalone, FastMCP receives the HTTP request directly from uvicorn. The token is in the `Authorization` header. The risk is:
-1. Reverse proxy (nginx) strips or modifies the `Authorization` header
-2. Token is read from FastMCP's request object but the wrong header key is used (case sensitivity)
-3. Token is forwarded but the format changes (e.g., nginx `auth_request` strips headers)
+`get_user_from_request()` does a DB lookup on every tool call. Existing tools handle this by caching the user PK in session state (`mcp:cached_user`). If a GraphQL resolver re-authenticates without using the session cache, it hits the DB on every resolver invocation.
+
+**How it manifests:**
+- DB query log shows many `auth_token` table lookups per GraphQL request
+- High DB load for moderate query volumes
+- Auth works but is slower than expected
 
 **How to avoid:**
-Verify the auth header reaches FastMCP in deployment:
-```python
-# Debug endpoint during development
-@mcp.tool()
-async def debug_auth_headers(ctx) -> dict:
-    """DEBUG ONLY — list all request headers."""
-    return dict(ctx.request_context.request.headers)
-```
+Use the existing session state pattern: `ctx.request_context.session.get("mcp:cached_user")` is already cached per session. Propagate that user PK into the GraphQL context without re-querying the token table.
 
-In production (nginx), ensure `Authorization` header is explicitly forwarded:
-```nginx
-location /mcp/ {
-    proxy_pass http://127.0.0.1:8005;
-    proxy_set_header Authorization $http_authorization;  # must be explicit
-    proxy_pass_header Authorization;  # if backend expects it
-}
-```
-
-**Warning signs:**
-- Auth works in dev (direct connection), fails in production (behind nginx)
-- Token visible in MCP client logs but auth fails server-side
-- `Authorization` header missing from FastMCP's `request.headers` dict
-
-**Phase to address:** Phase 4 (Auth Refactor) — verify token extraction in deployment config
+**Phase:** Phase 1 — Auth integration
 
 ---
 
-### Pitfall 8: MCPToolRegistry Accessed Before `nautobot.setup()` in Standalone Process
+## Integration Pitfalls
+
+### P11: Schema Built from Wrong `INSTALLED_APPS`
 
 **What goes wrong:**
-Third-party code or tests import from `nautobot_app_mcp_server` and try to access `MCPToolRegistry.get_instance()` or `register_mcp_tool()` before `nautobot.setup()` has run. If `MCPToolRegistry` or the tools module imports any Django model at module level, this raises `RuntimeError: Django wasn't set up yet`.
+The GraphQL schema includes models from apps that are not in the standalone process's `INSTALLED_APPS` but are in Nautobot's `PLUGINS`. Fields for third-party app models are missing, or the schema includes stale types.
 
 **Why it happens:**
-The embedded architecture's `MCPToolRegistry` is Django-model-agnostic (only stores function references). But `register_mcp_tool()` calls in `tools/__init__.py` import tool implementations that may transitively import Django models.
-
-```python
-# tools/core.py
-from nautobot.dcim.models import Device  # ← if this import runs at module level
-                                       #    before nautobot.setup(), it fails
-```
+`django.setup()` from the standalone process may load a different set of apps than Nautobot's own Django process. If the MCP server is started with its own `DJANGO_SETTINGS_MODULE` pointing to a minimal config, not all Nautobot plugin apps are loaded.
 
 **How to avoid:**
-Keep all model imports **inside** tool functions (lazy) or **inside** `@sync_to_async`-wrapped inner functions. The `MCPToolRegistry` itself has no Django dependencies — only the tool implementations do.
+Verify the MCP server uses the **same** `nautobot_config.py` as Nautobot, so `INSTALLED_APPS` + `PLUGINS` are identical. The Docker Compose env var `NAUTOBOT_CONFIG` must point to the shared config file.
 
-```python
-# CORRECT: model imported inside the async tool handler
-async def device_list(ctx, limit=25):
-    from nautobot.dcim.models import Device  # ← lazy import, safe
-    @sync_to_async
-    def _query():
-        return list(Device.objects.all()[:limit])
-    return await _query()
-```
-
-Add a startup validation test that imports the entire tools package before `nautobot.setup()` and asserts it succeeds (it should, if lazy imports are used).
-
-**Warning signs:**
-- `RuntimeError: Django wasn't set up yet` when importing `nautobot_app_mcp_server.tools`
-- Works after `nautobot.setup()`, fails before
-- Third-party `register_mcp_tool()` calls fail at import time
-
-**Phase to address:** Phase 2 (Tool Registration Refactor) — lazy import audit
+**Phase:** Phase 0 — Environment setup
 
 ---
 
-### Pitfall 9: MCP Endpoint URL Changes — Clients Break
+### P12: Concurrent GraphQL Requests Leak Data Across Sessions
 
 **What goes wrong:**
-Claude Desktop or other MCP clients are configured to connect to `http://nautobot:8080/plugins/nautobot-app-mcp-server/mcp/`. After migration to standalone, the endpoint moves to `http://mcp-server:8005/mcp/`. All client configs are now wrong.
+Thread-sensitivity issues cause data from one user's query to appear in another's results.
 
 **Why it happens:**
-The embedded MCP server was at Nautobot's plugin URL. The standalone MCP server runs on its own port. The URL change is a breaking change for all MCP clients.
+If `sync_to_async` is not `thread_sensitive=True`, async threads pick arbitrary pool threads. Django's `connection.cursor()` and some middleware state are not fully isolated. If `thread_sensitive=False`, cross-request state can leak.
 
 **How to avoid:**
-Provide a clear migration path with a deprecation period:
-1. Keep the embedded endpoint functional at the old URL during a transition window
-2. Update `SKILL.md` and documentation to reflect the new URL
-3. Provide a CLI flag `--legacy-embedded-mode` that preserves the old URL during transition
-4. Document the new URL prominently in `docs/admin/upgrade.md`
+Always use `sync_to_async(..., thread_sensitive=True)` for the GraphQL tool boundary. This is already the standard in existing tools — must be maintained for the new GraphQL tool.
 
-```python
-# upgrade path in nautobot-server management command
-# Keep old endpoint alive for deprecation period:
-# 1.x: Both embedded (old) and standalone (new) available
-# 2.0: Standalone only, embedded removed
-```
-
-**Warning signs:**
-- MCP clients return "connection refused" or "invalid endpoint" after upgrade
-- `SKILL.md` references old URL
-- Documentation still points to `/plugins/nautobot-app-mcp-server/mcp/`
-
-**Phase to address:** Phase 6 (UAT & Validation) — full client reconfiguration validation
+**Phase:** Phase 1 — Tool scaffold
 
 ---
 
-### Pitfall 10: `NautobotAppConfig` Still Required for Plugin Discovery
+## Warning Signs
 
-**What goes wrong:**
-If the app is migrated to standalone but still has a `NautobotAppConfig` in `__init__.py`, and is listed in `PLUGINS`, Nautobot may try to auto-discover and load it as a plugin. This could cause duplicate initialization or conflicts between the app plugin loading and the standalone server.
-
-**Why it happens:**
-Nautobot's plugin system loads any app in `PLUGINS` by importing its `__init__.py` and calling `setup()` on the `NautobotAppConfig`. If the standalone MCP server is also running (started separately), both the plugin loader and the standalone process try to initialize the same components.
-
-**How to avoid:**
-If keeping the standalone as a Nautobot app (for settings management and config inheritance):
-```python
-# __init__.py — guard to prevent double-init
-class NautobotAppMcpServerConfig(NautobotAppConfig):
-    name = "nautobot_app_mcp_server"
-
-    def ready(self):
-        # Only register if NOT running as standalone MCP server
-        if os.environ.get("NAUTOBOT_MCP_STANDALONE") != "1":
-            from .mcp import register_core_tools
-            register_core_tools()  # No-op if already registered by standalone
-```
-
-Alternatively, remove from `PLUGINS` entirely and manage config via env vars or `nautobot_config.py`'s `PLUGINS_CONFIG`.
-
-**Warning signs:**
-- Duplicate tool registrations (same tool registered twice)
-- `ValueError: Tool already registered` on startup
-- Plugin appears twice in Nautobot admin UI
-
-**Phase to address:** Phase 0 (Project Setup) — decide app vs standalone-only packaging
+| Warning Sign | Likely Cause |
+|---|---|
+| `SynchronousOnlyOperation` in resolver traceback | ORM call inside resolver without `sync_to_async` wrapper at tool boundary |
+| GraphQL query returns empty for valid-token session | User context not propagated; `AnonymousUser.restrict()` filtering all results |
+| IPAM data returned with `scope="dcim"` session | Raw query scope bypass — scopes only enforced at MCP tool name, not query AST |
+| Schema has no `Query` type on startup | `django.setup()` not called before schema import |
+| `/graphql/` URL returns 404 | GraphQL is an MCP tool, not a URL endpoint |
+| Inconsistent field values across identical queries | `DjangoObjectType` under non-`thread_sensitive=True` `sync_to_async` |
+| Schema introspection returns empty SDL | `graphene.Schema()` built before models loaded; wrong `INSTALLED_APPS` |
+| Many `auth_token` DB queries per GraphQL request | Token re-looked up in each resolver instead of session-cached user |
+| High DB query count for simple nested GraphQL query | N+1 problem; `prefetch_related` not configured |
 
 ---
 
-### Pitfall 11: Database Connection to Wrong Instance (Split-Brain)
+## Prevention Strategies
 
-**What goes wrong:**
-The MCP server's `nautobot_config.py` points to `NAUTOBOT_DB_HOST=localhost` (the default), while Nautobot itself connects to `nautobot-db` (Docker service name). The MCP server reads from a local SQLite or wrong Postgres, while Nautobot writes to the real DB. Data is stale or missing.
+1. **Wrap `schema.execute()` at the tool boundary.** One `sync_to_async(thread_sensitive=True)` call wrapping the entire GraphQL execution, not per-resolver guards.
 
-**Why it happens:**
-`nautobot.setup()` reads DB connection params from `NAUTOBOT_DB_*` env vars. If the MCP server's env doesn't include these (the Docker container doesn't inherit Nautobot's env), it falls back to Django defaults.
+2. **Propagate user into GraphQL context manually.** Resolve from session state before `execute()`, set `context["user"]`, access in resolvers via `info.context["user"]`. Never rely on HTTP request context inside resolvers.
 
-**How to avoid:**
-Explicitly pass all DB connection env vars to the MCP server container:
-```yaml
-# docker-compose.yml
-services:
-  nautobot-mcp:
-    environment:
-      NAUTOBOT_CONFIG: /config/nautobot_config.py
-      NAUTOBOT_DB_HOST: nautobot-db        # Must match Nautobot's DB host
-      NAUTOBOT_DB_PORT: 5432
-      NAUTOBOT_DB_NAME: ${NAUTOBOT_DB_NAME}
-      NAUTOBOT_DB_USER: ${NAUTOBOT_DB_USER}
-      NAUTOBOT_DB_PASSWORD: ${NAUTOBOT_DB_PASSWORD}
-    volumes:
-      - ./nautobot_config.py:/config/nautobot_config.py:ro
-    depends_on:
-      - nautobot-db
-```
+3. **Expose GraphQL as an MCP tool, not a URL endpoint.** Accept `{ query, variables, operation_name }` as tool arguments. Document this clearly.
 
-Also validate at startup by querying a known Nautobot-only table:
-```python
-nautobot.setup()
-from django.db import connection
-with connection.cursor() as c:
-    c.execute("SELECT 1 FROM extras_jobresult LIMIT 1")  # nautobot-specific table
-```
+4. **Scope enforcement: named tools over raw queries.** If scope enforcement matters, expose pre-named operations (`graphql_list_devices`, `graphql_get_ip_prefixes`) rather than a single raw query tool. Each tool name maps to a scope in `ScopeGuardMiddleware`.
 
-**Warning signs:**
-- MCP returns empty querysets for data known to exist in Nautobot
-- `device_list` returns 0 devices on MCP but 5 in Nautobot UI
-- MCP server has no `extras_jobresult` table
+5. **Validate queries against scope allowlists if raw queries are exposed.** Use the GraphQL AST to check field paths against session scopes before execution.
 
-**Phase to address:** Phase 0 (Project Setup) — Docker Compose env var wiring
+6. **Build schema at startup, not in signals.** Use a lazy singleton after `nautobot.setup()` completes.
+
+7. **Use same `nautobot_config.py` as Nautobot.** Verify `INSTALLED_APPS` + `PLUGINS` are identical in both processes.
+
+8. **Add `graphql_introspect` tool.** Return the schema SDL so AI agents can discover types without out-of-band documentation.
+
+9. **Configure `prefetch_related` / `select_related` on `DjangoObjectType`.** Prevent N+1 query problems in nested queries.
+
+10. **Add integration tests:** concurrent GraphQL queries through the MCP tool layer, verify auth is enforced, no cross-session data leakage, no `SynchronousOnlyOperation` in logs.
 
 ---
 
-### Pitfall 12: `view.py` and `urls.py` Not Removed — Old Endpoint Still Accessible
+## Phase Addressing Concerns
 
-**What goes wrong:**
-After migrating to standalone, `view.py` and `urls.py` are left in the codebase. If the app is still in `PLUGINS`, the old embedded endpoint is still mounted at `/plugins/nautobot-app-mcp-server/mcp/`. Users hit the old endpoint and get the broken embedded behavior while the documentation says to use the new standalone port.
-
-**Why it happens:**
-The Phase 5 "Bridge Cleanup" task is deferred or forgotten. `view.py` and `urls.py` are still committed. The `NautobotAppConfig` still has `name = "nautobot_app_mcp_server"` and `urls.py` is auto-discovered by Nautobot's plugin URL routing.
-
-**How to avoid:**
-Include `view.py` and `urls.py` removal as an explicit Phase 5 task with a checklist:
-- [ ] Delete `nautobot_app_mcp_server/urls.py`
-- [ ] Remove `urls` from `NautobotAppConfig` in `__init__.py`
-- [ ] Remove `@csrf_exempt` and `mcp_view` from `__init__.py` exports
-- [ ] Verify old endpoint returns 404 after cleanup
-- [ ] Document new standalone endpoint in upgrade notes
-
-**Warning signs:**
-- Old endpoint still responds with MCP JSON-RPC after migration
-- Two endpoints both serve MCP (old broken + new standalone)
-- `urls.py` still has `path("mcp/", mcp_view)` after Phase 5
-
-**Phase to address:** Phase 5 (Bridge Cleanup) — explicit deletion checklist
-
----
-
-## Technical Debt Patterns
-
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| `--workers 1` | Sessions work out of the box | No horizontal scaling, single point of failure | v1 only; must document as limitation |
-| In-memory session storage | No Redis dependency | Sessions lost on restart or worker switch | Single-worker dev; document clearly |
-| Lazy model imports | App loads without Django setup | Harder to catch import errors early | Always — never import Django models at module level |
-| Skip Docker health check | Faster startup | Silent failures, hard to debug | Never — add `livenessProbe` for MCP server |
-| Keep old `view.py` during transition | Backward compat | Users hit wrong endpoint | Only during explicit deprecation window, documented |
-| Single DB connection (no pooling config) | Simple config | Connection exhaustion under load | Only for low-traffic dev; use `CONN_MAX_AGE` in prod |
-
----
-
-## Integration Gotchas
-
-### Integration: uvicorn ↔ FastMCP
-
-| Common Mistake | Correct Approach |
-|----------------|------------------|
-| Not specifying `--workers 1` | Sessions live in each process; workers > 1 = session loss between requests |
-| Missing `--host 127.0.0.1` (exposes publicly) | Bind to localhost for proxy-only access; `--host 0.0.0.0` only with firewall |
-| Not configuring `proxy_fix` middleware | `X-Forwarded-*` headers ignored; `request.is_secure()` wrong behind nginx |
-| Not setting `BACKWARD_COMPAT_MODE` env | Old clients break without a clear error message |
-
-### Integration: Nautobot ↔ Standalone MCP Server
-
-| Common Mistake | Correct Approach |
-|----------------|------------------|
-| Different `NAUTOBOT_CONFIG` files | Both must use the same `nautobot_config.py` — shared volume in Docker |
-| MCP server starts before Nautobot DB is ready | Add `depends_on: nautobot-db` with healthcheck in docker-compose |
-| `nautobot.setup()` called twice (import + direct) | It's idempotent but confirms mis-structured startup |
-| Token auth uses wrong token format (with `nbapikey_` prefix) | Nautobot tokens are 40-char hex with no prefix; strip prefix in auth |
-| MCP server uses stale token DB | Tokens are in shared DB — no special handling needed |
-
-### Integration: Third-Party Plugins ↔ Standalone MCP Registry
-
-| Common Mistake | Correct Approach |
-|----------------|------------------|
-| Plugins call `register_mcp_tool()` from `ready()` — but `nautobot.setup()` not called yet | Entry point calls `nautobot.setup()` first; plugin `ready()` hooks fire during `django.setup()` which happens inside `nautobot.setup()` |
-| Plugin's `mcp_tools` module imports models at top level | Convention: `mcp_tools` modules must use lazy imports; audit with import test |
-| Tool registration in `post_migrate` never fires | Replace with startup discovery in `main.py` after `django.setup()` completes |
-
----
-
-## Performance Traps
-
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| `CONN_MAX_AGE` not set | New DB connection per request | Set `CONN_MAX_AGE=300` in `nautobot_config.py` | ~50+ concurrent MCP requests |
-| `select_related` missing on list tools | N+1 queries per page | Require `select_related` chain in code review for every list tool | list tools with >10 results |
-| No pagination limit cap | Client requests `limit=1000000` | Enforce `LIMIT_MAX=1000` in `paginate_queryset` | Large limit crashes or timeouts |
-| Session dict deserialization per tool call | CPU overhead at scale | Session dict ops are O(1) dict access — not a concern at expected scale | >10k tools with complex session state |
-| No connection pool sizing for multi-worker | DB connection exhaustion | uvicorn `--workers 4` + PostgreSQL `max_connections` ≥ `(workers × pool_size) + nautobot_connections` | 4+ workers, high concurrency |
-
----
-
-## Security Mistakes
-
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| MCP server exposed publicly (no auth) | Unauthenticated access to all Nautobot data | Always require `Authorization: Token <key>` header; reject at FastMCP layer if missing |
-| Token key logged in plaintext | Token exposure in server logs | Never log `auth_header[6:]`; log only `Token abc...12` (last 2 chars) |
-| `Authorization` header forwarded by nginx without `InternalRedirect` | Token visible in access logs | Use `proxy_set_header` not `proxy_pass_header` for `Authorization` |
-| MCP server can be reached without TLS in production | Token interception via network eavesdropping | Put behind HTTPS-terminating reverse proxy; uvicorn listens on localhost only |
-| No rate limiting on MCP endpoint | Token enumeration via brute force | Nautobot Token lookup is DB-backed; add uvicorn `--limit-concurrency` for DDoS protection |
-| `nautobot_config.py` world-readable in container | DB credentials exposed | `0600` permissions on config file; use Docker secrets for production |
-
----
-
-## UX Pitfalls
-
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Old endpoint documented in SKILL.md | Claude Desktop connects to wrong URL and fails silently | Update SKILL.md endpoint URL as part of Phase 5 cleanup; version the SKILL.md package |
-| No error message when token is expired | Agent retries forever with no explanation | Check `token.is_expired` in auth and return explicit error dict, not silent `AnonymousUser` |
-| Progressive disclosure not explained | New users don't know how to enable DCIM/IPAM tools | SKILL.md must document `mcp_enable_tools(scope="dcim")` with clear examples |
-| Session state not visible to user | User enables tools but can't verify it worked | `mcp_list_tools` should return structured output (not just text) so agent can parse |
-
----
-
-## "Looks Done But Isn't" Checklist
-
-- [ ] **`nautobot.setup()` placed at entry point:** Verified at first line of `main.py`, before any model imports
-- [ ] **All model imports are lazy:** `from nautobot.dcim.models import Device` is inside tool handlers, not at module level — audit `tools/core.py`
-- [ ] **`--workers 1` enforced in deployment:** `docker-compose.yml` and systemd unit file both specify single worker
-- [ ] **DB connection validated at startup:** Startup script queries a Nautobot-specific table (e.g., `extras_jobresult`) and exits non-zero on failure
-- [ ] **`NAUTOBOT_DB_*` env vars documented:** All required env vars listed in `docs/admin/install.md` with example values
-- [ ] **`nautobot_config.py` shared with Nautobot:** Docker volume mount verified in `docker-compose.yml`
-- [ ] **`view.py` and `urls.py` deleted:** Old endpoint no longer accessible; verified by `GET /plugins/nautobot-app-mcp-server/mcp/` → 404
-- [ ] **SKILL.md endpoint updated:** References `http://localhost:8005/mcp/` (or production equivalent), not the old plugin URL
-- [ ] **`MCPToolRegistry` accessible to third-party plugins:** `register_mcp_tool()` works from `AppConfig.ready()` hooks; tested with a dummy plugin
-- [ ] **Auth token format correct:** 40-char hex key, no `nbapikey_` prefix, verified against live Nautobot Token model
-- [ ] **Session state survives across requests:** UAT test with two sequential requests verifies progressive disclosure works end-to-end
-- [ ] **`sync_to_async` used on all ORM calls:** Code review checklist item passed; no `SynchronousOnlyOperation` in logs
-
----
-
-## Recovery Strategies
-
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| P1: `nautobot.setup()` called after model imports | LOW | Move `nautobot.setup()` to entry point; convert top-level model imports to lazy imports |
-| P2: Wrong DB config | MEDIUM | Update env vars or `nautobot_config.py`; restart container; verify with data smoke test |
-| P3: `post_migrate` never fires | MEDIUM | Implement startup plugin discovery in `main.py`; add integration test for third-party tool registration |
-| P4: Sessions lost on multi-worker | HIGH | Switch to `--workers 1` (immediate fix); implement Redis sessions for v2 |
-| P5: ORM without `sync_to_async` | LOW | Wrap all ORM calls in `@sync_to_async(thread_sensitive=True)` inner functions |
-| P6: Monkey-patched dataclass attrs | LOW | Replace `._mcp_tool_state` and `._cached_user` with session dict access |
-| P7: Auth token stripped by proxy | MEDIUM | Update nginx config with explicit `proxy_set_header Authorization`; test with debug tool |
-| P8: Registry accessed before setup | LOW | Audit `tools/` package for top-level model imports; fix to lazy imports |
-| P9: Old endpoint still accessible | LOW | Delete `view.py` + `urls.py`; update SKILL.md; restart container |
-| P10: Duplicate plugin init | LOW | Remove from `PLUGINS` or add env var guard in `ready()` |
-| P11: Split-brain DB | MEDIUM | Update Docker env vars to point to correct DB; run data smoke test |
-| P12: Old bridge files left in place | LOW | Delete `view.py`, `urls.py`; verify 404 on old endpoint |
-
----
-
-## Pitfall-to-Phase Mapping
-
-| Pitfall | Prevention Phase | Verification |
-|---------|-------------------|--------------|
-| P1: `nautobot.setup()` ordering | Phase 0 | `python -c "from nautobot_app_mcp_server.tools import *"` succeeds before setup |
-| P2: `NAUTOBOT_CONFIG` misconfigured | Phase 0 | Container starts, DB query succeeds, `extras_jobresult` table accessible |
-| P3: `post_migrate` not firing | Phase 2 | Integration test: fake plugin calls `register_mcp_tool()` from `ready()` → tool appears |
-| P4: Multi-worker session loss | Phase 0 | Document `--workers 1` requirement; UAT with `uvicorn --workers 4` shows failure |
-| P5: ORM without `sync_to_async` | Phase 2 | `grep -r "Device.objects" nautobot_app_mcp_server/mcp/tools/` returns only inside `@sync_to_async` blocks |
-| P6: Monkey-patching broken | Phase 3 | Progressive disclosure integration test passes with real `ctx.request_context.session` |
-| P7: Auth header stripped | Phase 4 | Dev proxy test: `curl -H "Authorization: Token $KEY"` arrives at FastMCP |
-| P8: Registry accessed early | Phase 2 | Startup validation test: import all tools modules before `nautobot.setup()` |
-| P9: Old endpoint breaks clients | Phase 6 | Old URL returns 404; new URL works; SKILL.md updated |
-| P10: Plugin double-init | Phase 0 | App not in `PLUGINS`; OR env var guard present; no duplicate registrations |
-| P11: Split-brain DB | Phase 0 | Docker health check + startup DB query validation |
-| P12: Old bridge files remain | Phase 5 | `view.py` deleted; `urls.py` deleted; `__init__.py` exports checked |
+| Concern | Phase |
+|---|---|
+| P1: `sync_to_async` boundary in resolvers | Phase 1 — Tool scaffold |
+| P2: Auth state not propagated to GraphQL context | Phase 1 — Auth integration |
+| P3: Raw query bypasses scope guard | Phase 1 — Architecture decision + Phase 2 — Authz enforcement |
+| P4: Django setup before schema import | Phase 1 — Server bootstrap |
+| P5: GraphQL as URL endpoint vs MCP tool | Phase 1 — Architecture decision |
+| P6: `DjangoObjectType` thread issues | Phase 2 — Concurrency testing |
+| P7: N+1 query problem | Phase 2 — Performance |
+| P8: No schema discovery for agents | Phase 2 — Discovery UX |
+| P9: Schema built in `post_migrate` signal | Phase 1 — Tool scaffold |
+| P10: Token DB lookup per request | Phase 1 — Auth integration |
+| P11: Schema built from wrong `INSTALLED_APPS` | Phase 0 — Environment setup |
+| P12: Cross-session data leakage | Phase 1 — Tool scaffold |
 
 ---
 
 ## Sources
 
-- `docs/dev/ARCHITECTURE.md` — standalone verification, `nautobot.setup()` analysis, Docker deployment design
-- `docs/dev/mcp-implementation-analysis.md` — session persistence patterns, FastMCP `StreamableHTTPSessionManager` internals
-- `ROADMAP.md` — Phase 0–6 scope, migration requirements, tool registration API design
-- `STATE.md` — current embedded architecture state (8 concurrency primitives, monkey-patching patterns to remove)
-- `nautobot_app_mcp_server/mcp/server.py` — current `_list_tools_mcp` override pattern to replace
-- `nautobot_app_mcp_server/mcp/session_tools.py` — current monkey-patched `_mcp_tool_state` pattern to replace with session dict
-- `nautobot_app_mcp_server/mcp/auth.py` — current `._cached_user` monkey-patch to replace with session dict
-- `nautobot_app_mcp_server/mcp/view.py` — current bridge to delete in Phase 5
-- `docs/dev/import_and_uat.md` — UAT patterns applicable to new architecture
+- `docs/dev/ARCHITECTURE.md` — standalone FastMCP architecture, session state, `sync_to_async` patterns
+- `.planning/research/PITFALLS.md` (prior) — existing standalone server pitfalls for reference
+- `nautobot_app_mcp_server/mcp/tools/core.py` — existing tool implementation patterns (thread-sensitivity, session state)
+- `nautobot_app_mcp_server/mcp/auth.py` — `get_user_from_request()` token auth flow
+- `nautobot_app_mcp_server/mcp/session_tools.py` — session state pattern
+- `nautobot_app_mcp_server/mcp/middleware.py` — `ScopeGuardMiddleware` scope enforcement logic
+- `nautobot_app_mcp_server/mcp/commands.py` — `create_app()` FastMCP factory
+- graphene-django documentation — `DjangoObjectType`, `DjangoSchema`, `DataLoader`, introspection patterns
 
 ---
-*Pitfalls research for: Nautobot App + FastMCP separate-process architecture migration*
-*Researched: 2026-04-05*
+
+*Pitfalls research for: Adding graphene-django GraphQL MCP tool to standalone FastMCP process*
+*Researched: 2026-04-15*
