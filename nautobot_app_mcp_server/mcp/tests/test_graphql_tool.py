@@ -242,3 +242,56 @@ class GraphQLQueryHandlerTestCase(TestCase):
         self.assertIn("errors", result)
         self.assertIsNone(result["data"])
         self.assertEqual(result["errors"][0]["message"], "Authentication required")
+
+    @patch("nautobot.core.graphql.execute_query")
+    def test_anonymous_user_empty_query_results(self, mock_execute):
+        """GQL-13: AnonymousUser triggers ValueError from execute_query → empty result.
+
+        When _sync_graphql_query is called with user=None (AnonymousUser),
+        execute_query raises ValueError("Either request or username should be provided").
+        The try/except in _sync_graphql_query catches this and returns
+        {"data": None, "errors": [{"message": "Authentication required"}]}.
+        """
+        # Simulate execute_query raising ValueError for anonymous user
+        mock_execute.side_effect = ValueError(
+            "Either request or username should be provided"
+        )
+
+        result = graphql_tool._sync_graphql_query(
+            query="{ devices { name } }",
+            variables=None,
+            user=None,
+        )
+
+        self.assertIsNone(result["data"])
+        self.assertIn("errors", result)
+        self.assertEqual(result["errors"][0]["message"], "Authentication required")
+
+    @patch("nautobot.core.graphql.execute_query")
+    def test_authenticated_user_normal_results(self, mock_execute):
+        """GQL-13: Authenticated user → execute_query returns non-empty filtered data.
+
+        When user is a real User instance, execute_query runs normally
+        and returns a valid ExecutionResult with data. Permission filtering
+        is handled internally by generate_restricted_queryset() in Nautobot.
+        """
+        mock_result = MagicMock(
+            formatted={
+                "data": {"devices": [{"name": "router-01"}]},
+                "errors": None,
+            }
+        )
+        mock_execute.return_value = mock_result
+
+        user = self._get_or_create_superuser()
+
+        result = graphql_tool._sync_graphql_query(
+            query="{ devices { name } }",
+            variables=None,
+            user=user,
+        )
+
+        self.assertIn("data", result)
+        self.assertIsNone(result["errors"])
+        self.assertNotEqual(result["data"]["devices"], [])
+        self.assertEqual(result["data"]["devices"][0]["name"], "router-01")

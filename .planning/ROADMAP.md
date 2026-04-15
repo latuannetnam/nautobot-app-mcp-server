@@ -28,6 +28,7 @@
 | 6 | UAT & Smoke Tests | v1.1.0 | 1/1 | Complete | 2026-04-04 |
 | 7 | Setup | v1.2.0 | 3/3 | Complete | 2026-04-05 |
 | 8 | Infrastructure | v1.2.0 | 4/4 | Complete | 2026-04-05 |
+<<<<<<< Updated upstream
 | 9 | Tool Registration | v1.2.0 | 6/6 | Complete | 2026-04-05 |
 | 10 | Session State | v1.2.0 | 4/4 | Complete | 2026-04-05 |
 | 11 | Auth Refactor | v1.2.0 | 2/2 | Complete | 2026-04-06 |
@@ -37,6 +38,13 @@
 | 15 | Introspection & Permissions | v2.0 | 3/3 | Planned | — |
 | 16 | Security Hardening | v2.0 | 4/4 | Planned | — |
 | 17 | UAT & Documentation | v2.0 | 3/3 | Planned | — |
+=======
+| 9 | Tool Registration | v1.2.0 | 4/6 | In Progress | — |
+| 10 | Session State | v1.2.0 | 0/4 | Not started | — |
+| 11 | Auth Refactor | v1.2.0 | 0/4 | Not started | — |
+| 12 | Bridge Cleanup | v1.2.0 | 0/6 | Not started | — |
+| 13 | UAT & Validation | v1.2.0 | 0/5 | Not started | — |
+>>>>>>> Stashed changes
 
 ---
 
