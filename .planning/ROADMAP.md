@@ -94,7 +94,7 @@
 
 **Plans:**
 
-| # | Plan | Success Criteria |
+1/1 plans complete
 |---|------|-------------------|
 | 14.1 | Create `nautobot_app_mcp_server/mcp/tools/graphql_tool.py` | File created; contains `graphql_query` async handler; imports `nautobot.core.graphql.execute_query` |
 | 14.2 | Implement `graphql_query` — `async def` + `sync_to_async(thread_sensitive=True)` at outer boundary | Tool function is `async def`; single `sync_to_async(thread_sensitive=True)` wraps the entire `execute_query()` call |
