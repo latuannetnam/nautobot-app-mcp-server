@@ -1,39 +1,50 @@
 ---
 gsd_state_version: 1.0
 milestone: v2.0
-milestone_name: Planning Pending
+milestone_name: GraphQL MCP Tool
 status: planning
-last_updated: "2026-04-07T09:53:00Z"
-last_activity: 2026-04-07 -- v1.2.0 shipped; planning next milestone
+last_updated: "2026-04-15T00:00:00Z"
+last_activity: 2026-04-15 — v2.0 roadmap created (4 phases, 20 requirements)
 progress:
-  total_phases: 3
-  completed_phases: 1
-  total_plans: 7
-  completed_plans: 5
-  percent: 71
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 15
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-07 (v1.2.0 milestone shipped)
+**Last updated:** 2026-04-15 (v2.0 roadmap created)
 
 ---
 
 ## Current Position
 
-Milestone: v2.0 — Planning Pending
-Last activity: 2026-04-07 — v1.2.0 shipped; planning next milestone
-Progress: [▓▓▓▓▓▓▓▓▓▓] All milestones complete: v1.0, v1.1.0, v1.2.0
+Phase: Not started (roadmap defined, implementation not begun)
+Plan: —
+Status: Roadmap defined — awaiting Phase 14 kickoff
+Last activity: 2026-04-15 — v2.0 GraphQL MCP Tool roadmap created
 
 ---
 
 ## Milestone Summary
 
+**v2.0 (GraphQL MCP Tool) — PLANNED**
+
+- `graphql_query` MCP tool wrapping `nautobot.core.graphql.execute_query()` with `sync_to_async(thread_sensitive=True)`
+- `graphql_introspect` companion tool returning GraphQL schema SDL
+- Auth propagated to GraphQL execution context via `get_user_from_request()`
+- Query depth limit (≤8) and complexity limit (≤1000) to prevent DoS
+- Structured error handling — no HTTP 500s for GraphQL errors
+- 15 unit tests across 4 phases; UAT smoke test P-09 + full suite T-37+
+- SKILL.md updated with `graphql_query` and `graphql_introspect` documentation
+
 **v1.2.0 (Separate Process Refactor) — SHIPPED 2026-04-07**
 
 - Migrated MCP server from embedded Django process (Option A) to standalone FastMCP process (Option B)
 - `start_mcp_server.py` + `start_mcp_dev_server.py` management commands as canonical entry points
-- MCP server runs on port 8005; `invoke start` launches it automatically via `docker-compose.mcp.yml`
+- MCP server runs on port 8005; `invoke start` launches it automatically via Docker Compose
 - `tool_registry.json` for cross-process plugin discovery (replaces `post_migrate`)
 - All 10 core tools async + `sync_to_async(thread_sensitive=True)`
 - Session state via FastMCP `ctx.get_state()`/`ctx.set_state()` (no monkey-patching)
@@ -59,20 +70,10 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] All milestones complete: v1.0, v1.1.0
 
 | Phase | Name | Status | Completed |
 |---|---|---|---|
-| 0 | Project Setup | Complete | 2026-04-01 |
-| 1 | MCP Server Infrastructure | Complete | 2026-04-01 |
-| 2 | Auth & Sessions | Complete | 2026-04-01 |
-| 3 | Core Read Tools | Complete | 2026-04-02 |
-| 4 | SKILL.md Package | Complete | 2026-04-02 |
-| 5 | MCP Server Refactor | Complete | 2026-04-04 |
-| 6 | UAT & Smoke Tests | Complete | 2026-04-04 |
-| 7 | Setup | Complete | 2026-04-05 |
-| 8 | Infrastructure | Complete | 2026-04-05 |
-| 9 | Tool Registration | Complete | 2026-04-05 |
-| 10 | Session State | Complete | 2026-04-05 |
-| 11 | Auth Refactor | Complete | 2026-04-06 |
-| 12 | Bridge Cleanup | Complete | 2026-04-06 |
-| 13 | UAT & Validation | Complete | 2026-04-07 |
+| 14 | GraphQL Tool Scaffold | Planned | — |
+| 15 | Introspection & Permissions | Planned | — |
+| 16 | Security Hardening | Planned | — |
+| 17 | UAT & Documentation | Planned | — |
 
 ---
 
@@ -83,21 +84,16 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] All milestones complete: v1.0, v1.1.0
 | v1.0 | 2026-04-02 | Phases 0–4 | MVP shipped |
 | v1.1.0 | 2026-04-04 | Phases 5–6 | Embedded FastMCP refactor |
 | v1.2.0 | 2026-04-07 | Phases 7–13 | Separate process refactor |
+| v2.0 | 2026-04-15 | Phases 14–17 | GraphQL MCP Tool (planned) |
 
 ---
 
 ## Next Steps
 
-- `/gsd-new-milestone` — plan v2.0 (write tools, Redis sessions, horizontal scaling)
+- Begin Phase 14 — GraphQL tool scaffold
+- Implement `graphql_query` MCP tool in `mcp/tools/graphql_tool.py`
+- Write unit tests covering auth propagation, valid query, invalid query, variables injection
 
 ---
 
-## Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|------------|
-| 260407-pdr | Rewrite README with MCP description, usage, development guide | 2026-04-07 | 4e6cc66 | [link](./quick/260407-pdr-rewrite-readme-md-with-mcp-server-descri/) |
-
----
-
-*State last updated: 2026-04-07*
+*State last updated: 2026-04-15*
