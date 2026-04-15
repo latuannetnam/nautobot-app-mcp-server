@@ -220,58 +220,24 @@
     }
   },
   {
-    "name": "juniper_static_route_list",
-    "description": "List Juniper static routes for a device, filtered by optional routing instance name.",
-    "tier": "app",
-    "app_label": "netnam_cms_core",
-    "scope": "netnam_cms_core.juniper",
+    "name": "graphql_query",
+    "description": "Execute a GraphQL query against Nautobot's GraphQL API. Returns a dict with 'data' and 'errors' keys. Auth token is required \u2014 anonymous queries return empty data.",
+    "tier": "core",
+    "app_label": null,
+    "scope": "core",
     "input_schema": {
       "type": "object",
       "properties": {
-        "device_name": {
-          "type": "string",
-          "default": null
-        },
-        "routing_instance_name": {
-          "type": "string",
-          "default": null
-        },
-        "limit": {
-          "type": "integer",
-          "default": 25
-        },
-        "cursor": {
-          "type": "string",
-          "default": null
-        }
-      },
-      "required": [],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "juniper_static_route_get",
-    "description": "Get a Juniper static route by device name + destination prefix. Use routing_instance_name to disambiguate routes in non-global tables.",
-    "tier": "app",
-    "app_label": "netnam_cms_core",
-    "scope": "netnam_cms_core.juniper",
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "device_name": {
+        "query": {
           "type": "string"
         },
-        "destination_prefix": {
-          "type": "string"
-        },
-        "routing_instance_name": {
+        "variables": {
           "type": "string",
           "default": null
         }
       },
       "required": [
-        "device_name",
-        "destination_prefix"
+        "query"
       ],
       "additionalProperties": false
     }
