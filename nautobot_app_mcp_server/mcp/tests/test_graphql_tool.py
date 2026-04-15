@@ -218,29 +218,25 @@ class GraphQLQueryHandlerTestCase(TestCase):
             token.delete()
 
     @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
+        "nautobot.core.graphql.execute_query"
     )
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_query"
-    )
-    def test_anonymous_user_triggers_auth_error(self, mock_sync, mock_get_user):
-        """GQL-07: Anonymous user triggers ValueError guard — structured error returned.
+    def test_anonymous_user_triggers_auth_error(self, mock_execute):
+        """GQL-07: execute_query ValueError is caught and returns structured error dict.
 
-        When get_user_from_request returns AnonymousUser, execute_query raises
-        ValueError because it requires a real user. The handler's try/except
-        catches this and returns {"data": None, "errors": [{"message": "..."}]}.
-        Mock _sync_graphql_query with side_effect to simulate execute_query behavior.
+        When user is None (AnonymousUser), execute_query raises ValueError.
+        The handler's try/except catches this and returns
+        {"data": None, "errors": [{"message": "Authentication required"}]}.
+
+        Patches nautobot.core.graphql.execute_query because _sync_graphql_query
+        uses a lazy import (imported inside the function body), so the name
+        is not in graphql_tool's module namespace at decoration time.
         """
-        mock_get_user.return_value = AnonymousUser()
-        # Simulate what execute_query does when user is None: raise ValueError
-        mock_sync.side_effect = ValueError("Either request or username should be provided")
+        mock_execute.side_effect = ValueError("Either request or username should be provided")
 
-        ctx = _make_mock_ctx(authorization=None)
-
-        result = AsyncToSync(graphql_tool._graphql_query_handler)(
-            ctx,
+        result = graphql_tool._sync_graphql_query(
             query="{ devices { name } }",
             variables=None,
+            user=AnonymousUser(),
         )
 
         self.assertIn("errors", result)
