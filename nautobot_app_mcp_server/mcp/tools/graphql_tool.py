@@ -65,12 +65,13 @@ def _sync_graphql_query(query: str, variables: dict | None, user) -> dict[str, A
     from graphql import ExecutionResult
     from graphql.validation import specified_rules
 
-    from nautobot_app_mcp_server.mcp.tools import graphql_validation
-
     # Initialise _graphql lazily once (module-level so tests can patch the attribute)
     import nautobot_app_mcp_server.mcp.tools.graphql_tool as _self
+    from nautobot_app_mcp_server.mcp.tools import graphql_validation
+
     if not hasattr(_self, "_graphql") or _self._graphql is None:  # pragma: no cover
         import graphql as _graphql_module
+
         _self._graphql = _graphql_module
 
     # Step 1: Auth guard (existing — preserved from Phase 14)
