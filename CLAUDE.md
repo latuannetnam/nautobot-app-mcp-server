@@ -20,10 +20,13 @@ unset VIRTUAL_ENV && poetry run invoke cli       # shell into running container
 unset VIRTUAL_ENV && poetry run invoke build    # rebuild image (after poetry.lock change)
 
 # Tests
-unset VIRTUAL_ENV && poetry run invoke unittest -b -f -k -s           # all unit tests (buffered, failfast, keepdb, skip docs)
-unset VIRTUAL_ENV && poetry run invoke unittest -b -f -k -s -l module  # specific module
-unset VIRTUAL_ENV && poetry run invoke unittest --coverage              # with coverage
-unset VIRTUAL_ENV && poetry run invoke tests                            # full CI pipeline (linters + tests)
+unset VIRTUAL_ENV && poetry run invoke unittest -b -f -k -s                        # all unit tests (buffered, failfast, keepdb)
+unset VIRTUAL_ENV && poetry run invoke unittest -b -f -s -l module                  # all tests in a specific module
+unset VIRTUAL_ENV && poetry run invoke unittest -b -f -s -l module -k test_name     # single test by name pattern
+unset VIRTUAL_ENV && poetry run invoke unittest --coverage                           # with coverage
+unset VIRTUAL_ENV && poetry run invoke tests                                         # full CI pipeline (linters + unit tests + coverage)
+# invoke unittest uses -l (label) to target a module/directory and -k (pattern) to filter by name
+# invoke tests runs ruff, djlint, yamllint, markdownlint, poetry check, migrations check, pylint, docs, then unittest
 
 # Linting
 unset VIRTUAL_ENV && poetry run invoke ruff [--fix]   # PEP 8, isort, flake8, bandit
@@ -127,6 +130,7 @@ AI Agent → HTTP POST localhost:8005/mcp/
 |---|---|
 | Source changes not picked up | Changes are immediate (volume-mounted at `/source`); rebuild only for deps |
 | `VIRTUAL_ENV=/usr` errors | Always `unset VIRTUAL_ENV` before Poetry commands in WSL |
+| `docker exec ... unittest` wrong approach | Always run `invoke unittest` from **host/project root** — it delegates into the container via `run_command()` which sets all required env vars (`NAUTOBOT_CONFIG`, DB creds, etc.). Direct `docker exec` bypasses this and causes config/DB errors |
 | `invoke tests` fails after tests pass | `ruff format .` inside container |
 | "Connection not available" in async tools | Use `sync_to_async(..., thread_sensitive=True)` for ALL ORM calls |
 | Cursor separator in `search_by_name` | Uses `base64(f"{model}@{pk}")` — `@` used because UUIDs contain dots. List tools use plain `base64(pk)` (no separator) |
