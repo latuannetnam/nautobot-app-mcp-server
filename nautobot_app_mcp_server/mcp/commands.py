@@ -13,7 +13,6 @@ from __future__ import annotations
 import os
 
 import nautobot
-from django.db import connection
 
 
 def create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple:
@@ -106,9 +105,11 @@ def create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple:
     # Side-effect imports trigger @register_tool decoration in each module,
     # populating MCPToolRegistry. All registered tools are then attached to the
     # FastMCP instance.
-    from nautobot_app_mcp_server.mcp import register_all_tools_with_mcp
+    from nautobot_app_mcp_server.mcp import (
+        register_all_tools_with_mcp,
+        session_tools,  # noqa: F401
+    )
     from nautobot_app_mcp_server.mcp.tools import core  # noqa: F401
-    from nautobot_app_mcp_server.mcp import session_tools  # noqa: F401
 
     register_all_tools_with_mcp(mcp)
 

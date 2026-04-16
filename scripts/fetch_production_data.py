@@ -45,6 +45,7 @@ def _load_env():
 # REST helpers
 # ---------------------------------------------------------------------------
 
+
 def prod_get(path: str, params: dict | None = None) -> requests.Response:
     url = f"{PROD_URL}/api{path}"
     for attempt in range(3):
@@ -60,7 +61,8 @@ def prod_get(path: str, params: dict | None = None) -> requests.Response:
         except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as exc:
             if attempt < 2:
                 import time as _time
-                wait = 2 ** attempt * 10
+
+                wait = 2**attempt * 10
                 print(f"  [!] {exc!s} — retrying in {wait}s (attempt {attempt + 1}/3)...", flush=True)
                 _time.sleep(wait)
             else:
@@ -113,6 +115,7 @@ def log(msg: str):
 # Normalize helpers — convert nested API objects to flat name/id refs
 # ---------------------------------------------------------------------------
 
+
 def _ns(obj: dict | None, key: str) -> str | None:
     """Return .get('name') from a nested object (or None)."""
     v = obj.get(key) if isinstance(obj, dict) else None
@@ -148,6 +151,7 @@ def _flatten_namespace(obj: dict | None) -> str | None:
 # Per-model fetchers — normalize to Phase-2-friendly flat shape
 # ---------------------------------------------------------------------------
 
+
 def fetch_statuses() -> list[dict]:
     items = fetch_all("/extras/statuses/")
     return [{"name": i.get("name")} for i in items if i.get("name")]
@@ -164,10 +168,12 @@ def fetch_device_types() -> list[dict]:
     for i in items:
         mfr_obj = i.get("manufacturer")
         mfr_name = (mfr_obj.get("name") if isinstance(mfr_obj, dict) else None) or "Unknown"
-        out.append({
-            "model": i.get("model"),
-            "manufacturer_name": mfr_name,
-        })
+        out.append(
+            {
+                "model": i.get("model"),
+                "manufacturer_name": mfr_name,
+            }
+        )
     return out
 
 
@@ -190,13 +196,15 @@ def fetch_locations() -> list[dict]:
         parent_obj = i.get("parent")
         lt_name = (lt_obj.get("name") if isinstance(lt_obj, dict) else None) or ""
         parent_name = (parent_obj.get("name") if isinstance(parent_obj, dict) else None) or ""
-        out.append({
-            "id": i.get("id"),
-            "name": i.get("name"),
-            "location_type_name": lt_name,
-            "parent_name": parent_name,
-            "status_name": _flatten_status(i) or "Active",
-        })
+        out.append(
+            {
+                "id": i.get("id"),
+                "name": i.get("name"),
+                "location_type_name": lt_name,
+                "parent_name": parent_name,
+                "status_name": _flatten_status(i) or "Active",
+            }
+        )
     return out
 
 
@@ -262,18 +270,22 @@ def fetch_interfaces(device_ids: list[str]) -> list[dict]:
     for dev_id in device_ids:
         ifaces = fetch_all(f"/dcim/interfaces/?device_id={dev_id}")
         for i in ifaces:
-            all_ifaces.append({
-                "device_name": None,  # resolved below
-                "device_id": dev_id,
-                "name": i.get("name"),
-                "status_name": _flatten_status(i) or "Active",
-                "enabled": i.get("enabled", True),
-                "type": _nv(i, "type") or "other",
-                "mtu": i.get("mtu"),
-                "mac_address": i.get("mac_address") or "",
-                "description": i.get("description") or "",
-                "ip_addresses": [addr.get("address") for addr in (i.get("ip_addresses") or []) if addr.get("address")],
-            })
+            all_ifaces.append(
+                {
+                    "device_name": None,  # resolved below
+                    "device_id": dev_id,
+                    "name": i.get("name"),
+                    "status_name": _flatten_status(i) or "Active",
+                    "enabled": i.get("enabled", True),
+                    "type": _nv(i, "type") or "other",
+                    "mtu": i.get("mtu"),
+                    "mac_address": i.get("mac_address") or "",
+                    "description": i.get("description") or "",
+                    "ip_addresses": [
+                        addr.get("address") for addr in (i.get("ip_addresses") or []) if addr.get("address")
+                    ],
+                }
+            )
     return all_ifaces
 
 
@@ -283,13 +295,15 @@ def fetch_ip_addresses() -> list[dict]:
     for i in items:
         ns_obj = i.get("namespace")
         ns_name = (ns_obj.get("name") if isinstance(ns_obj, dict) else None) or "Global"
-        out.append({
-            "address": i.get("address"),
-            "namespace_name": ns_name,
-            "status_name": _flatten_status(i) or "Active",
-            "dns_name": i.get("dns_name") or "",
-            "description": i.get("description") or "",
-        })
+        out.append(
+            {
+                "address": i.get("address"),
+                "namespace_name": ns_name,
+                "status_name": _flatten_status(i) or "Active",
+                "dns_name": i.get("dns_name") or "",
+                "description": i.get("description") or "",
+            }
+        )
     return out
 
 
@@ -300,12 +314,14 @@ def fetch_prefixes() -> list[dict]:
     for i in items:
         ns_obj = i.get("namespace")
         ns_name = (ns_obj.get("name") if isinstance(ns_obj, dict) else None) or "Global"
-        out.append({
-            "prefix": i.get("prefix"),
-            "namespace_name": ns_name,
-            "status_name": _flatten_status(i) or "Active",
-            "description": i.get("description") or "",
-        })
+        out.append(
+            {
+                "prefix": i.get("prefix"),
+                "namespace_name": ns_name,
+                "status_name": _flatten_status(i) or "Active",
+                "description": i.get("description") or "",
+            }
+        )
     return out
 
 
@@ -316,19 +332,22 @@ def fetch_vlans() -> list[dict]:
     for i in items:
         ns_obj = i.get("namespace")
         ns_name = (ns_obj.get("name") if isinstance(ns_obj, dict) else None) or "Global"
-        out.append({
-            "name": i.get("name"),
-            "vid": i.get("vid"),
-            "namespace_name": ns_name,
-            "status_name": _flatten_status(i) or "Active",
-            "description": i.get("description") or "",
-        })
+        out.append(
+            {
+                "name": i.get("name"),
+                "vid": i.get("vid"),
+                "namespace_name": ns_name,
+                "status_name": _flatten_status(i) or "Active",
+                "description": i.get("description") or "",
+            }
+        )
     return out
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     global PROD_URL, PROD_TOKEN, DEVICE_NAMES, _t0
@@ -432,7 +451,9 @@ def main():
     # Summary
     total = sum(f["count"] for f in manifest["files"].values())
     print(f"       Total records: {total:,}")
-    print(f"\nNext: Run Phase 2 — docker exec nautobot-app-mcp-server-nautobot-1 nautobot-server import_production_data")
+    print(
+        "\nNext: Run Phase 2 — docker exec nautobot-app-mcp-server-nautobot-1 nautobot-server import_production_data"
+    )
 
 
 if __name__ == "__main__":

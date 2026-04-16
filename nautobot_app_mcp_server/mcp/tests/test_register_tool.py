@@ -59,6 +59,7 @@ class TestFuncSignatureToInputSchema(TestCase):
 
     def test_func_signature_to_input_schema_required_param(self):
         """Required params (no default) appear in 'required' list."""
+
         async def my_handler(ctx, query: str):
             pass  # noqa: ARG001
 
@@ -94,6 +95,7 @@ class TestRegisterToolDecorator(TestCase):
 
     def test_register_tool_decorator_registers_in_registry(self):
         """@register_tool registers the tool in MCPToolRegistry."""
+
         @register_tool(description="A test tool.", tier="core", scope="core")
         async def my_tool(ctx, name: str = "default"):
             return {"ok": True}
@@ -148,6 +150,7 @@ class TestRegisterToolDecorator(TestCase):
 
     def test_register_tool_duplicate_name_raises(self):
         """Registering a tool with a name already in the registry raises ValueError."""
+
         async def dup_tool(ctx, x: int = 1):
             pass
 
@@ -183,6 +186,7 @@ class TestRegisterAllToolsWithMcp(TestCase):
 
     def test_register_all_tools_with_mcp_wires_tools(self):
         """register_all_tools_with_mcp calls mcp.tool() for every registered tool."""
+
         async def tool_a(ctx, x: int = 1):
             return {}
 
@@ -228,6 +232,7 @@ class TestRegisterAllToolsWithMcp(TestCase):
         schema is auto-derived from Python type hints. This test ensures the wiring
         function does not try to pass it.
         """
+
         async def my_tool(ctx, x: int = 1):
             return {}
 

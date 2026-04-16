@@ -71,10 +71,7 @@ class ScopeGuardMiddleware(FastMCPMiddleware):
 
         # Check scope hierarchy: enabling parent scope enables all children
         tool_scope = tool.scope or ""
-        matches = any(
-            tool_scope == s or tool_scope.startswith(f"{s}.")
-            for s in enabled
-        )
+        matches = any(tool_scope == s or tool_scope.startswith(f"{s}.") for s in enabled)
         if matches:
             return await call_next(context)
 

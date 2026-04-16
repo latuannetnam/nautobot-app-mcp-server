@@ -19,7 +19,6 @@ from pathlib import Path
 from time import time
 
 from django.core.management.base import BaseCommand
-from django.db import transaction
 
 
 class Command(BaseCommand):
@@ -48,7 +47,11 @@ class Command(BaseCommand):
     def _load(self, cache_dir: Path, name: str) -> list[dict]:
         path = self._cache_path(cache_dir, name)
         if not path.exists():
-            self.stderr.write(self.style.ERROR(f"Cache file not found: {path}. Run Phase 1 first: python scripts/fetch_production_data.py"))
+            self.stderr.write(
+                self.style.ERROR(
+                    f"Cache file not found: {path}. Run Phase 1 first: python scripts/fetch_production_data.py"
+                )
+            )
             sys.exit(1)
         return json.loads(path.read_text())
 
@@ -56,7 +59,7 @@ class Command(BaseCommand):
         """Bulk-insert in batches, report progress."""
         total = 0
         for i in range(0, len(model_objects), batch_size):
-            batch = model_objects[i:i + batch_size]
+            batch = model_objects[i : i + batch_size]
             self.stdout.write(f"    {label} batch {i // batch_size + 1}: {len(batch)} records")
         return len(model_objects)
 
@@ -100,7 +103,7 @@ class Command(BaseCommand):
         # -------------------------------------------------------------------------
         from nautobot.dcim.models import Device, DeviceType, Interface, Location, LocationType, Manufacturer, Platform
         from nautobot.extras.models import Role, Status
-        from nautobot.ipam.models import IPAddress, Namespace, Prefix, VLAN
+        from nautobot.ipam.models import VLAN, IPAddress, Namespace, Prefix
 
         # -------------------------------------------------------------------------
         # Build name→object maps from existing dev DB
@@ -336,7 +339,7 @@ class Command(BaseCommand):
             )
         total_prefix_batches = 0
         for i in range(0, len(prefix_objs), 500):
-            batch = prefix_objs[i:i + 500]
+            batch = prefix_objs[i : i + 500]
             Prefix.objects.bulk_create(batch, ignore_conflicts=True)
             total_prefix_batches += 1
             self.stdout.write(f"    Prefixes: batch {total_prefix_batches} ({len(batch)} records)")
@@ -390,4 +393,6 @@ class Command(BaseCommand):
 
         elapsed = time() - t0
         self.stdout.write(self.style.SUCCESS(f"\nDone in {elapsed:.1f}s"))
-        self.stdout.write("Run UAT: docker exec nautobot-app-mcp-server-nautobot-1 python /source/scripts/run_mcp_uat.py")
+        self.stdout.write(
+            "Run UAT: docker exec nautobot-app-mcp-server-nautobot-1 python /source/scripts/run_mcp_uat.py"
+        )

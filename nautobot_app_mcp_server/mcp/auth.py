@@ -134,9 +134,7 @@ async def get_user_from_request(ctx: ToolContext):  # noqa: ANN201
         try:
             # PIT-AUTHFIX: Wrap ORM call in sync_to_async with thread_sensitive=True
             # to run on Django's request thread where the DB connection is available.
-            user = await sync_to_async(_lookup_user_by_pk_sync, thread_sensitive=True)(
-                cached_user_id
-            )
+            user = await sync_to_async(_lookup_user_by_pk_sync, thread_sensitive=True)(cached_user_id)
             return user
         except Exception:  # noqa: BLE001 — User.DoesNotExist, de-activated, etc.
             # Stale or invalid cache — fall through to re-authenticate (S110)

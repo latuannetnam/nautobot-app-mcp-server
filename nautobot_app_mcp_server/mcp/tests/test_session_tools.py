@@ -11,8 +11,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 from django.test import TestCase
 
-from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
-
 # Side-effect import: triggers @register_tool on session_tools, registering
 # ``mcp_enable_tools``, ``mcp_disable_tools``, and ``mcp_list_tools`` into
 # MCPToolRegistry before any test runs.  Without this, tools may not be
@@ -20,7 +18,7 @@ from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 # modules (``test_register_tool``) can interfere with the import order in
 # Django's test loader.
 import nautobot_app_mcp_server.mcp.session_tools  # noqa: F401
-
+from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 
 # -------------------------------------------------------------------
 # Shared fixtures
@@ -70,9 +68,7 @@ class ToolScopeStateTestCase(TestCase):
         from nautobot_app_mcp_server.mcp.session_tools import _get_enabled_scopes
 
         mock_ctx = _make_mock_ctx()
-        result = asyncio.get_event_loop().run_until_complete(
-            _get_enabled_scopes(mock_ctx)
-        )
+        result = asyncio.get_event_loop().run_until_complete(_get_enabled_scopes(mock_ctx))
         self.assertEqual(result, set())
 
     def test_get_enabled_scopes_returns_stored(self):
@@ -100,9 +96,7 @@ class ToolScopeStateTestCase(TestCase):
         from nautobot_app_mcp_server.mcp.session_tools import _get_enabled_searches
 
         mock_ctx = _make_mock_ctx()
-        result = asyncio.get_event_loop().run_until_complete(
-            _get_enabled_searches(mock_ctx)
-        )
+        result = asyncio.get_event_loop().run_until_complete(_get_enabled_searches(mock_ctx))
         self.assertEqual(result, set())
 
     def test_get_enabled_searches_returns_stored(self):
@@ -239,9 +233,7 @@ class ProgressiveDisclosureTestCase(TestCase):
             self.assertEqual(tools[0].name, "test_app_progressive")
             # But session has no enabled scopes (key absent from store → None)
             mock_ctx = _make_mock_ctx(enabled_scopes=None)
-            enabled = asyncio.get_event_loop().run_until_complete(
-                mock_ctx.get_state("mcp:enabled_scopes")
-            )
+            enabled = asyncio.get_event_loop().run_until_complete(mock_ctx.get_state("mcp:enabled_scopes"))
             self.assertIsNone(enabled)
         finally:
             del registry._tools["test_app_progressive"]  # pylint: disable=protected-access
@@ -403,7 +395,6 @@ class MCPToolRegistrationTestCase(TestCase):
 
     def test_session_tools_in_registry(self):
         """mcp_enable_tools, mcp_disable_tools, mcp_list_tools registered on registry."""
-        import nautobot_app_mcp_server.mcp.session_tools  # noqa: F401
 
         registry = MCPToolRegistry.get_instance()
         all_tools = registry.get_all()
@@ -429,9 +420,7 @@ class MCPToolRegistrationTestCase(TestCase):
 class ScopeGuardMiddlewareTestCase(TestCase):
     """Test ScopeGuardMiddleware on_call_tool enforcement (P3-03)."""
 
-    def _make_middleware_context(
-        self, tool_name: str, enabled_scopes: set[str] | None = None
-    ) -> tuple:
+    def _make_middleware_context(self, tool_name: str, enabled_scopes: set[str] | None = None) -> tuple:
         """Build a MiddlewareContext + call_next for ScopeGuardMiddleware testing."""
         params = MagicMock()
         params.name = tool_name
@@ -477,9 +466,7 @@ class ScopeGuardMiddlewareTestCase(TestCase):
         )
         try:
             middleware = ScopeGuardMiddleware()
-            ctx, call_next = self._make_middleware_context(
-                "test_guard_tool", enabled_scopes={"test_app.guarded"}
-            )
+            ctx, call_next = self._make_middleware_context("test_guard_tool", enabled_scopes={"test_app.guarded"})
 
             asyncio.get_event_loop().run_until_complete(middleware.on_call_tool(ctx, call_next))
 
@@ -505,9 +492,7 @@ class ScopeGuardMiddlewareTestCase(TestCase):
         )
         try:
             middleware = ScopeGuardMiddleware()
-            ctx, call_next = self._make_middleware_context(
-                "test_parent_guard", enabled_scopes={"dcim"}
-            )
+            ctx, call_next = self._make_middleware_context("test_parent_guard", enabled_scopes={"dcim"})
 
             asyncio.get_event_loop().run_until_complete(middleware.on_call_tool(ctx, call_next))
 
@@ -538,9 +523,7 @@ class ScopeGuardMiddlewareTestCase(TestCase):
             middleware = ScopeGuardMiddleware()
             # Use a non-empty enabled scope so middleware reaches the scope-check path,
             # not the permissive "no scopes enabled yet" branch
-            ctx, call_next = self._make_middleware_context(
-                "test_blocked_tool", enabled_scopes={"other_scope"}
-            )
+            ctx, call_next = self._make_middleware_context("test_blocked_tool", enabled_scopes={"other_scope"})
 
             loop = asyncio.get_event_loop()
             with self.assertRaises(ToolNotFoundError) as ctx_exc:

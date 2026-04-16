@@ -47,7 +47,6 @@ class NautobotAppMcpServerConfig(NautobotAppConfig):
         import os  # noqa: F401
 
         import nautobot_app_mcp_server.mcp.tools  # noqa: F401
-
         from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry
 
         registry = MCPToolRegistry.get_instance()

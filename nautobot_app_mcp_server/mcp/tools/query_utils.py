@@ -36,8 +36,6 @@ _STANDARD_EXCLUDE = [
 
 def serialize_device(device: Device) -> dict[str, Any]:
     """Serialize a Device to a JSON-serializable dict."""
-    from nautobot.dcim.models import Device  # lazy import — avoids module-level Nautobot model import
-
     data = model_to_dict(
         device,
         fields=[
@@ -78,8 +76,6 @@ def serialize_device_with_interfaces(device: Device) -> dict[str, Any]:
 
 def serialize_interface(interface: Interface) -> dict[str, Any]:
     """Serialize an Interface to a JSON-serializable dict."""
-    from nautobot.dcim.models import Interface  # lazy import — avoids module-level Nautobot model import
-
     data = model_to_dict(
         interface,
         fields=[
@@ -120,8 +116,6 @@ def serialize_interface(interface: Interface) -> dict[str, Any]:
 
 def serialize_ipaddress(ip: IPAddress) -> dict[str, Any]:
     """Serialize an IPAddress to a JSON-serializable dict."""
-    from nautobot.ipam.models import IPAddress  # lazy import — avoids module-level Nautobot model import
-
     data = model_to_dict(
         ip,
         fields=["pk", "dns_name", "description", "ip_version"],
@@ -158,8 +152,6 @@ def serialize_ipaddress(ip: IPAddress) -> dict[str, Any]:
 
 def serialize_prefix(prefix: Prefix) -> dict[str, Any]:
     """Serialize a Prefix to a JSON-serializable dict."""
-    from nautobot.ipam.models import Prefix  # lazy import — avoids module-level Nautobot model import
-
     data = model_to_dict(
         prefix,
         fields=["pk", "description", "type", "date_allocated"],
@@ -185,8 +177,6 @@ def serialize_prefix(prefix: Prefix) -> dict[str, Any]:
 
 def serialize_vlan(vlan: VLAN) -> dict[str, Any]:
     """Serialize a VLAN to a JSON-serializable dict."""
-    from nautobot.ipam.models import VLAN  # lazy import — avoids module-level Nautobot model import
-
     data = model_to_dict(
         vlan,
         fields=["pk", "name", "vid", "description"],
@@ -205,8 +195,6 @@ def serialize_vlan(vlan: VLAN) -> dict[str, Any]:
 
 def serialize_location(location: Location) -> dict[str, Any]:
     """Serialize a Location to a JSON-serializable dict."""
-    from nautobot.dcim.models import Location  # lazy import — avoids module-level Nautobot model import
-
     data = model_to_dict(
         location,
         fields=["pk", "name", "description"],
@@ -325,8 +313,6 @@ def _looks_like_uuid(value: str) -> bool:
 
 def _sync_device_list(user: User, limit: int, cursor: str | None) -> dict[str, Any]:
     """Sync implementation of device_list."""
-    from nautobot.dcim.models import Device  # lazy import — avoids module-level Nautobot model import
-
     from nautobot_app_mcp_server.mcp.tools.pagination import paginate_queryset
 
     qs = build_device_qs().restrict(user, action="view")
@@ -341,8 +327,6 @@ def _sync_device_list(user: User, limit: int, cursor: str | None) -> dict[str, A
 
 def _sync_device_get(user: User, name_or_id: str) -> dict[str, Any]:
     """Sync implementation of device_get (D-02 not-found + D-03 name-or-id)."""
-    from nautobot.dcim.models import Device  # lazy import — avoids module-level Nautobot model import
-
     if _looks_like_uuid(name_or_id):
         qs = (
             build_device_qs()
@@ -365,8 +349,6 @@ def _sync_device_get(user: User, name_or_id: str) -> dict[str, Any]:
 
 def _sync_interface_list(user: User, device_name: str | None, limit: int, cursor: str | None) -> dict[str, Any]:  # noqa: E501
     """Sync implementation of interface_list."""
-    from nautobot.dcim.models import Interface  # lazy import — avoids module-level Nautobot model import
-
     from nautobot_app_mcp_server.mcp.tools.pagination import paginate_queryset
 
     qs = build_interface_qs().restrict(user, action="view")
@@ -383,8 +365,6 @@ def _sync_interface_list(user: User, device_name: str | None, limit: int, cursor
 
 def _sync_interface_get(user: User, name_or_id: str) -> dict[str, Any]:
     """Sync implementation of interface_get (D-02 + D-03)."""
-    from nautobot.dcim.models import Interface  # lazy import — avoids module-level Nautobot model import
-
     if _looks_like_uuid(name_or_id):
         qs = build_interface_qs_with_ip_addresses().filter(pk=name_or_id).restrict(user, action="view")
     else:
@@ -397,8 +377,6 @@ def _sync_interface_get(user: User, name_or_id: str) -> dict[str, Any]:
 
 def _sync_ipaddress_list(user: User, limit: int, cursor: str | None) -> dict[str, Any]:
     """Sync implementation of ipaddress_list."""
-    from nautobot.ipam.models import IPAddress  # lazy import — avoids module-level Nautobot model import
-
     from nautobot_app_mcp_server.mcp.tools.pagination import paginate_queryset
 
     qs = build_ipaddress_qs().restrict(user, action="view")
@@ -413,8 +391,6 @@ def _sync_ipaddress_list(user: User, limit: int, cursor: str | None) -> dict[str
 
 def _sync_ipaddress_get(user: User, name_or_id: str) -> dict[str, Any]:
     """Sync implementation of ipaddress_get (D-02 + D-03)."""
-    from nautobot.ipam.models import IPAddress  # lazy import — avoids module-level Nautobot model import
-
     if _looks_like_uuid(name_or_id):
         qs = build_ipaddress_qs_with_interfaces().filter(pk=name_or_id).restrict(user, action="view")
     else:
@@ -427,8 +403,6 @@ def _sync_ipaddress_get(user: User, name_or_id: str) -> dict[str, Any]:
 
 def _sync_prefix_list(user: User, limit: int, cursor: str | None) -> dict[str, Any]:
     """Sync implementation of prefix_list."""
-    from nautobot.ipam.models import Prefix  # lazy import — avoids module-level Nautobot model import
-
     from nautobot_app_mcp_server.mcp.tools.pagination import paginate_queryset
 
     qs = build_prefix_qs().restrict(user, action="view")
@@ -443,8 +417,6 @@ def _sync_prefix_list(user: User, limit: int, cursor: str | None) -> dict[str, A
 
 def _sync_vlan_list(user: User, limit: int, cursor: str | None) -> dict[str, Any]:
     """Sync implementation of vlan_list."""
-    from nautobot.ipam.models import VLAN  # lazy import — avoids module-level Nautobot model import
-
     from nautobot_app_mcp_server.mcp.tools.pagination import paginate_queryset
 
     qs = build_vlan_qs().restrict(user, action="view")
@@ -459,8 +431,6 @@ def _sync_vlan_list(user: User, limit: int, cursor: str | None) -> dict[str, Any
 
 def _sync_location_list(user: User, limit: int, cursor: str | None) -> dict[str, Any]:
     """Sync implementation of location_list."""
-    from nautobot.dcim.models import Location  # lazy import — avoids module-level Nautobot model import
-
     from nautobot_app_mcp_server.mcp.tools.pagination import paginate_queryset
 
     qs = build_location_qs().restrict(user, action="view")

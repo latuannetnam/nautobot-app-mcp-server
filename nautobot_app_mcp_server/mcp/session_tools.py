@@ -98,9 +98,7 @@ class ToolScopeState:
     async def set_enabled_searches(self, ctx: ToolContext, searches: set[str]) -> None:
         await _set_enabled_searches(ctx, searches)
 
-    async def apply_enable(
-        self, ctx: ToolContext, scope: str | None, search: str | None
-    ) -> list[str]:
+    async def apply_enable(self, ctx: ToolContext, scope: str | None, search: str | None) -> list[str]:
         """Enable scope and/or search. Returns message parts for the return value."""
         parts: list[str] = []
         if scope:
