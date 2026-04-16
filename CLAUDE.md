@@ -20,9 +20,10 @@ unset VIRTUAL_ENV && poetry run invoke cli       # shell into running container
 unset VIRTUAL_ENV && poetry run invoke build    # rebuild image (after poetry.lock change)
 
 # Tests
-unset VIRTUAL_ENV && poetry run invoke unittest         # unit tests
-unset VIRTUAL_ENV && poetry run invoke unittest --coverage  # with coverage
-unset VIRTUAL_ENV && poetry run invoke tests          # full CI pipeline (linters + tests)
+unset VIRTUAL_ENV && poetry run invoke unittest -b -f -k -s           # all unit tests (buffered, failfast, keepdb, skip docs)
+unset VIRTUAL_ENV && poetry run invoke unittest -b -f -k -s -l module  # specific module
+unset VIRTUAL_ENV && poetry run invoke unittest --coverage              # with coverage
+unset VIRTUAL_ENV && poetry run invoke tests                            # full CI pipeline (linters + tests)
 
 # Linting
 unset VIRTUAL_ENV && poetry run invoke ruff [--fix]   # PEP 8, isort, flake8, bandit
@@ -37,13 +38,6 @@ bash scripts/reset_dev_db.sh --all      # full pipeline: reset → fetch → imp
 # UAT (from host, hits MCP server on port 8005)
 python scripts/test_mcp_simple.py       # 8 smoke tests P-01–P-08
 python scripts/run_mcp_uat.py          # 37 full UAT tests T-01–T-36
-```
-
-**Inside container for MCP tests:**
-```bash
-docker exec -it nautobot-app-mcp-server-nautobot-1 /bin/bash
-cd /source
-poetry run nautobot-server test nautobot_app_mcp_server.mcp.tests
 ```
 
 **Debug imports:**
