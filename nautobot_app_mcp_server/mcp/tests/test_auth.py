@@ -65,6 +65,8 @@ def _make_mock_ctx(
     authorization: str | None = None,
     state_store: dict | None = None,
     token_key_to_user: dict | None = None,
+    enabled_scopes: set[str] | None = None,
+    enabled_searches: set[str] | None = None,
 ) -> MagicMock:
     """Build a mock ToolContext with an Authorization header and state store.
 
@@ -76,6 +78,14 @@ def _make_mock_ctx(
             lookup can be tested without triggering Django's
             SynchronousOnlyOperation guard (Django 4.2 blocks sync ORM calls
             from async contexts, including AsyncToSync thread pools).
+        enabled_scopes: Set of scope strings pre-populated in state store
+            under the key ``mcp:enabled_scopes``.  Used by
+            ScopeGuardMiddleware tests to simulate sessions with scopes
+            already enabled.
+        enabled_searches: Set of search strings pre-populated in state store
+            under the key ``mcp:enabled_searches``.  Used by
+            ProgressiveDisclosureIntegrationTestCase to simulate sessions with
+            search filters already set.
     """
     mock_request = MagicMock()
     mock_request.headers = {}
@@ -88,6 +98,13 @@ def _make_mock_ctx(
 
     if state_store is None:
         state_store = {}
+    # Pre-populate state keys so callers can simulate non-empty sessions.
+    # Use ``is not None`` (not bare truthiness) so empty set/list is stored
+    # as [] rather than treated as "key not present".
+    if enabled_scopes is not None:
+        state_store["mcp:enabled_scopes"] = list(enabled_scopes)
+    if enabled_searches is not None:
+        state_store["mcp:enabled_searches"] = list(enabled_searches)
 
     async def _mock_get_state(key: str):
         return state_store.get(key)

@@ -21,15 +21,22 @@ class TestCreateApp(TestCase):
         self.assertEqual(host, "127.0.0.1")
         self.assertEqual(port, 9000)
 
-    def test_create_app_db_failure_raises_runtime_error(self):
-        """connection.ensure_connection() failure raises RuntimeError with descriptive message."""
+    def test_create_app_no_explicit_db_check(self):
+        """create_app() does not perform an explicit DB connectivity check at startup.
+
+        The MCP server trusts that the DB is healthy (depends_on: db: healthy in
+        Docker Compose) and defers connectivity checks to request time.  This
+        means create_app() does NOT call connection.ensure_connection(), so
+        mocking it has no effect on the return value.
+        """
         from nautobot_app_mcp_server.mcp.commands import create_app
 
-        with patch("nautobot_app_mcp_server.mcp.commands.connection.ensure_connection") as mock_ensure:
-            mock_ensure.side_effect = Exception("connection refused")
-
-            with self.assertRaises(RuntimeError) as ctx:
-                create_app()
-
-            self.assertIn("Database connectivity check failed:", str(ctx.exception))
-            self.assertIn("connection refused", str(ctx.exception))
+        with patch(
+            "nautobot_app_mcp_server.mcp.commands.connection.ensure_connection",
+            side_effect=Exception("unreachable"),
+        ):
+            # create_app() must still return a valid (mcp, host, port) tuple
+            # even when ensure_connection would fail — there is no explicit call.
+            result = create_app(host="127.0.0.1", port=9000)
+            self.assertIsInstance(result, tuple)
+            self.assertEqual(len(result), 3)

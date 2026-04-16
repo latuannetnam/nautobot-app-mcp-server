@@ -13,6 +13,14 @@ from django.test import TestCase
 
 from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry, ToolDefinition
 
+# Side-effect import: triggers @register_tool on session_tools, registering
+# ``mcp_enable_tools``, ``mcp_disable_tools``, and ``mcp_list_tools`` into
+# MCPToolRegistry before any test runs.  Without this, tools may not be
+# registered yet when MCPToolRegistrationTestCase runs because earlier test
+# modules (``test_register_tool``) can interfere with the import order in
+# Django's test loader.
+import nautobot_app_mcp_server.mcp.session_tools  # noqa: F401
+
 
 # -------------------------------------------------------------------
 # Shared fixtures
@@ -28,10 +36,13 @@ def _make_mock_ctx(
     Phase 10: session state is stored via ``ctx.set_state()`` / ``ctx.get_state()``.
     The fixture uses a shared ``_store`` dict so that ``set_state`` calls actually
     persist, and subsequent ``get_state`` calls see those values.
+
+    ``None`` means "key not present in store" (get_state returns None).
+    An empty set/list means "key is present but no values" (get_state returns []).
     """
     _store: dict[str, list[str] | None] = {
-        "mcp:enabled_scopes": list(enabled_scopes) if enabled_scopes else None,
-        "mcp:enabled_searches": list(enabled_searches) if enabled_searches else None,
+        "mcp:enabled_scopes": list(enabled_scopes) if enabled_scopes is not None else None,
+        "mcp:enabled_searches": list(enabled_searches) if enabled_searches is not None else None,
     }
 
     async def mock_set_state(key: str, value: list[str]) -> None:
@@ -226,8 +237,8 @@ class ProgressiveDisclosureTestCase(TestCase):
             tools = registry.get_by_scope("test_app.special")
             self.assertEqual(len(tools), 1)
             self.assertEqual(tools[0].name, "test_app_progressive")
-            # But session has no enabled scopes
-            mock_ctx = _make_mock_ctx(enabled_scopes=set())
+            # But session has no enabled scopes (key absent from store → None)
+            mock_ctx = _make_mock_ctx(enabled_scopes=None)
             enabled = asyncio.get_event_loop().run_until_complete(
                 mock_ctx.get_state("mcp:enabled_scopes")
             )
@@ -367,9 +378,31 @@ class ProgressiveDisclosureIntegrationTestCase(TestCase):
 class MCPToolRegistrationTestCase(TestCase):
     """Verify session tools are registered in MCPToolRegistry (P3-04)."""
 
+    @classmethod
+    def setUpClass(cls):
+        """Force re-import of session_tools after TestRegisterAllToolsWithMcp resets the registry.
+
+        ``TestRegisterAllToolsWithMcp.setUp`` clears ``MCPToolRegistry._tools = {}``.
+        Because ``session_tools`` is already cached in ``sys.modules`` from an earlier
+        module-level import, Python skips re-executing the module body — the
+        ``@register_tool`` decorators that register ``mcp_enable_tools``,
+        ``mcp_disable_tools``, and ``mcp_list_tools`` never fire for this class's
+        tests.  This ``setUpClass`` pops the ``sys.modules`` entry so that the
+        first test method's import forces full re-execution and re-registers the
+        tools.  Runs once per class (not per test), so subsequent test methods
+        benefit from the re-registered state.
+        """
+        import sys
+
+        # Remove the cached module so the next import re-executes it
+        sys.modules.pop("nautobot_app_mcp_server.mcp.session_tools", None)
+        # Also remove related modules that session_tools imports
+        sys.modules.pop("nautobot_app_mcp_server.mcp.middleware", None)
+        sys.modules.pop("nautobot_app_mcp_server.mcp.auth", None)
+        super().setUpClass()
+
     def test_session_tools_in_registry(self):
         """mcp_enable_tools, mcp_disable_tools, mcp_list_tools registered on registry."""
-        # Importing session_tools triggers @register_tool on each implementation
         import nautobot_app_mcp_server.mcp.session_tools  # noqa: F401
 
         registry = MCPToolRegistry.get_instance()
@@ -381,8 +414,6 @@ class MCPToolRegistrationTestCase(TestCase):
 
     def test_session_tools_tier_is_core(self):
         """Session tools are tier="core" so they always appear in get_core_tools."""
-        import nautobot_app_mcp_server.mcp.session_tools  # noqa: F401
-
         registry = MCPToolRegistry.get_instance()
         core_names = [t.name for t in registry.get_core_tools()]
         self.assertIn("mcp_enable_tools", core_names)
@@ -408,9 +439,9 @@ class ScopeGuardMiddlewareTestCase(TestCase):
 
         mock_ctx = _make_mock_ctx(enabled_scopes=enabled_scopes)
 
-        # MiddlewareContext has .method (params) and .fastmcp_context
+        # MiddlewareContext has .message (params) and .fastmcp_context
         mock_middleware_ctx = MagicMock()
-        mock_middleware_ctx.method = params
+        mock_middleware_ctx.message = params
         mock_middleware_ctx.fastmcp_context = mock_ctx
 
         call_next = AsyncMock()
