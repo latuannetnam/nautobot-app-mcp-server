@@ -31,6 +31,7 @@ DEV_TOKEN = os.environ.get(
 # MCP Client
 # ---------------------------------------------------------------------------
 
+
 class MCPClient:
     def __init__(self, endpoint: str, token: str):
         self.endpoint = endpoint.rstrip("/")
@@ -90,12 +91,14 @@ class MCPClient:
         return data.get("result", {}).get("tools", [])
 
     def call_tool(self, name: str, arguments: dict | None = None) -> dict:
-        resp = self._post({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments or {}},
-        })
+        resp = self._post(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments or {}},
+            }
+        )
         data = self._parse_sse(resp.text)
         if "error" in data:
             raise RuntimeError(f"call_tool error: {data['error']}")
@@ -120,6 +123,7 @@ class MCPClient:
 # ---------------------------------------------------------------------------
 # Smoke tests
 # ---------------------------------------------------------------------------
+
 
 def run() -> bool:
     print("=" * 60)
@@ -149,9 +153,11 @@ def run() -> bool:
         total = result.get("total_count", "?")
         print(f"   Returned {len(items)} devices (total={total})")
         for item in items:
-            print(f"     - {item['name']} | status={item.get('status')} | "
-                  f"device_type={item.get('device_type')} | "
-                  f"location={item.get('location')}")
+            print(
+                f"     - {item['name']} | status={item.get('status')} | "
+                f"device_type={item.get('device_type')} | "
+                f"location={item.get('location')}"
+            )
         print("   OK")
 
         # 4. Call device_get on first device
@@ -165,6 +171,15 @@ def run() -> bool:
                 print(f"     - {iface['name']} | type={iface.get('type')} | enabled={iface.get('enabled')}")
             print("   OK")
 
+        # 5. Call graphql_query
+        print("5. Call graphql_query...")
+        result = client.call_tool("graphql_query", {"query": "{ devices(first: 5) { name status } }"})
+        assert "data" in result, "graphql_query result must have 'data' key"
+        assert result["data"] is not None, f"Expected data, got: {result}"
+        assert "errors" in result, "graphql_query result must have 'errors' key"
+        print(f"   Returned data (errors={result.get('errors')})")
+        print("   OK")
+
         print()
         print("All smoke tests PASSED")
         return True
@@ -172,6 +187,7 @@ def run() -> bool:
     except Exception as e:
         print(f"\nFAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

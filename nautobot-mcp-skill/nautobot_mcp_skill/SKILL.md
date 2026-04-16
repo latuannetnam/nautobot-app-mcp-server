@@ -49,6 +49,95 @@ All list tools use cursor-based pagination:
 | vlan_list | List VLANs with site/group, status, and role. | `limit?: int (default=25, max=1000)`, `cursor?: str` | Yes |
 | location_list | List locations with location type, parent, and tenant. | `limit?: int (default=25, max=1000)`, `cursor?: str` | Yes |
 | search_by_name | Multi-model name search across devices, interfaces, IP addresses, prefixes, VLANs, and locations. All search terms must match (AND semantics). | `query: str`, `limit?: int (default=25, max=1000)`, `cursor?: str` | Yes |
+| graphql_query | Execute an arbitrary GraphQL query against Nautobot's GraphQL API. Returns {data, errors}. | `query: str`, `variables?: dict | None` | No |
+| graphql_introspect | Return the Nautobot GraphQL schema as an SDL string. Use to discover available types and fields. | (none) | No |
+
+---
+
+## GraphQL Tools
+
+Nautobot exposes a full [graphene-django](https://docs.graphene-python.org/projects/django/)
+GraphQL API. These tools let you execute arbitrary GraphQL queries and introspect the
+schema directly from the MCP server.
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| graphql_query | Execute an arbitrary GraphQL query. Returns `{"data": ..., "errors": [...]}` — both keys always present. | `query: str`, `variables?: dict | None` |
+| graphql_introspect | Return the Nautobot GraphQL schema as an SDL string. Use to discover available types and fields before writing queries. | (none) |
+
+### graphql_query
+
+Execute arbitrary GraphQL queries against Nautobot's graphene-django schema.
+Auth token is required — anonymous queries return `{"data": null, "errors": [{"message": "Authentication required"}]}`.
+
+**Parameters:**
+- `query: str` — GraphQL query string (required)
+- `variables: dict | None` — Optional variables for parameterized queries (default: `None`)
+
+**Result shape:**
+```json
+{
+  "data": { ... } | null,
+  "errors": [ { "message": "...", "locations": [...], "path": [...] } ] | null
+}
+```
+Both `data` and `errors` keys are always present. If a query succeeds with no errors,
+`errors` is `null`. If a query fails, `data` is `null`.
+
+**Error cases:** Errors are returned in the `errors` array (HTTP 200, no HTTP 500):
+- `"Authentication required"` — missing or invalid token
+- `"Query depth N exceeds maximum allowed depth of 8"` — query too deeply nested
+- `"Query complexity N exceeds maximum allowed complexity of 1000"` — query selects too many fields
+- `"Syntax Error: ..."` — malformed GraphQL syntax
+
+**Example — Simple device listing:**
+```graphql
+query {
+  devices(first: 10) {
+    name
+    status
+  }
+}
+```
+```python
+result = mcp.call_tool("graphql_query", {
+    "query": "query { devices(first: 10) { name status } }"
+})
+# → {"data": {"devices": [...]}, "errors": None}
+```
+
+**Example — With variables:**
+```graphql
+query GetDevices($limit: Int!) {
+  devices(first: $limit) {
+    name
+    status
+    platform { name }
+    location { name }
+  }
+}
+```
+```python
+result = mcp.call_tool("graphql_query", {
+    "query": "query GetDevices($limit: Int!) { devices(first: $limit) { name status } }",
+    "variables": {"limit": 5}
+})
+# → {"data": {"devices": [...]}, "errors": None}
+```
+
+### graphql_introspect
+
+Returns the full Nautobot GraphQL schema as a GraphQL SDL string. Use this to discover
+available object types, fields, and relationships before writing queries. Auth token required.
+
+**Returns:** Multi-line SDL string (e.g. `"type Query {\\n  devices: [Device]!\\n  ...\\n}"`)
+
+**Example:**
+```python
+sdl = mcp.call_tool("graphql_introspect", {})
+# "schema {\\n  query: Query\\n}\\ntype Query {\\n  devices(first: Int): [Device]\\n  ..."
+print(sdl)  # View all available types and fields
+```
 
 ---
 
@@ -66,7 +155,7 @@ All list tools use cursor-based pagination:
 
 Three tool scopes are available:
 
-- `core` — Always enabled. Contains: `device_list`, `device_get`, `interface_list`, `interface_get`, `ipaddress_list`, `ipaddress_get`, `prefix_list`, `vlan_list`, `location_list`, `search_by_name`, plus `mcp_enable_tools`, `mcp_disable_tools`, `mcp_list_tools`.
+- `core` — Always enabled. Contains: `device_list`, `device_get`, `interface_list`, `interface_get`, `ipaddress_list`, `ipaddress_get`, `prefix_list`, `vlan_list`, `location_list`, `search_by_name`, `graphql_query`, `graphql_introspect`, plus `mcp_enable_tools`, `mcp_disable_tools`, `mcp_list_tools`.
 - `dcim` — Devices and interfaces. Child scopes: `dcim.device`, `dcim.interface`.
 - `ipam` — IP addresses, prefixes, VLANs, locations. Child scopes: `ipam.prefix`, `ipam.vlan`, `ipam.ip`, `ipam.location`.
 

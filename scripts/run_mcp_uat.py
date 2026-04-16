@@ -54,6 +54,7 @@ DEV_TOKEN = os.environ.get(
 # MCP JSON-RPC 2.0 Client
 # ---------------------------------------------------------------------------
 
+
 class MCPClient:
     """Minimal JSON-RPC 2.0 client for FastMCP streamable http transport.
 
@@ -200,6 +201,7 @@ class MCPToolError(Exception):
 # Test Runner Infrastructure
 # ---------------------------------------------------------------------------
 
+
 class TestResult:
     def __init__(self, name: str):
         self.name = name
@@ -218,7 +220,7 @@ class TestResult:
         self.passed = False
 
     def __str__(self):
-        status = "✅ PASS" if self.passed else f"❌ FAIL"
+        status = "✅ PASS" if self.passed else "❌ FAIL"
         ms = f" ({self.duration_ms:.0f}ms)" if self.duration_ms else ""
         msg = f"{status}{ms} — {self.name}"
         if self.error:
@@ -266,9 +268,9 @@ class TestRunner:
 # UAT Test Cases
 # ---------------------------------------------------------------------------
 
+
 def run_uat() -> bool:
     """Run all UAT test cases."""
-
     print("=" * 70)
     print("nautobot-app-mcp-server UAT — Functional & Performance Tests")
     print("=" * 70)
@@ -290,10 +292,19 @@ def run_uat() -> bool:
         tool_names = [t["name"] for t in tools]
         # All 13 core tools should be visible
         expected = {
-            "device_list", "device_get", "interface_list", "interface_get",
-            "ipaddress_list", "ipaddress_get", "prefix_list", "vlan_list",
-            "location_list", "search_by_name",
-            "mcp_enable_tools", "mcp_disable_tools", "mcp_list_tools",
+            "device_list",
+            "device_get",
+            "interface_list",
+            "interface_get",
+            "ipaddress_list",
+            "ipaddress_get",
+            "prefix_list",
+            "vlan_list",
+            "location_list",
+            "search_by_name",
+            "mcp_enable_tools",
+            "mcp_disable_tools",
+            "mcp_list_tools",
         }
         missing = expected - set(tool_names)
         if missing:
@@ -383,8 +394,7 @@ def run_uat() -> bool:
         result = client.call_tool("interface_list", {"device_name": device_name, "limit": 50})
         assert "items" in result
         for iface in result["items"]:
-            assert iface.get("device") == device_name, \
-                f"Expected device={device_name}, got {iface.get('device')}"
+            assert iface.get("device") == device_name, f"Expected device={device_name}, got {iface.get('device')}"
         return result
 
     runner.test("T-08 interface_list device_name filter", t08)
@@ -571,8 +581,7 @@ def run_uat() -> bool:
             name_lower = item.get("name", "").lower()
             # Both terms should appear somewhere in the name
             for term in terms:
-                assert term.lower() in name_lower, \
-                    f"AND semantics violated: term '{term}' not in '{name_lower}'"
+                assert term.lower() in name_lower, f"AND semantics violated: term '{term}' not in '{name_lower}'"
         return result
 
     runner.test("T-23 search_by_name AND semantics", t23)
@@ -743,6 +752,7 @@ def run_uat() -> bool:
 
     def p08():
         import concurrent.futures
+
         t0 = time.perf_counter()
 
         def call_device_list():
@@ -760,6 +770,101 @@ def run_uat() -> bool:
 
     runner.test("P-08 Concurrent 2 parallel requests < 30s", p08)
 
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # 4. GraphQL Tools (T-37 to T-43)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    print("\n## GraphQL Tools")
+
+    def t37():
+        result = client.call_tool("graphql_query", {"query": "{ devices(first: 5) { name status } }"})
+        assert "data" in result, "Result must have 'data' key"
+        assert "errors" in result, "Result must have 'errors' key"
+        assert result["data"] is not None, f"Expected data, got: {result}"
+        return result
+
+    runner.test("T-37 graphql_query valid query — data returned, no errors", t37)
+
+    def t38():
+        result = client.call_tool(
+            "graphql_query",
+            {
+                "query": "{ devices {"  # unclosed brace — syntax error
+            },
+        )
+        assert "data" in result
+        assert "errors" in result
+        assert result["data"] is None, "Syntax error → data must be None"
+        assert result["errors"] is not None and len(result["errors"]) > 0
+        assert "Syntax Error" in result["errors"][0]["message"]
+        return {"syntax_error_handled": True}
+
+    runner.test("T-38 graphql_query syntax error — structured errors dict, no HTTP 500", t38)
+
+    def t39():
+        sdl = client.call_tool("graphql_introspect", {})
+        assert isinstance(sdl, str), "Introspect must return string"
+        assert len(sdl) > 50, "SDL should be > 50 chars"
+        assert "type Query" in sdl, "SDL must contain 'type Query'"
+        return {"sdl_length": len(sdl)}
+
+    runner.test("T-39 graphql_introspect returns valid SDL schema string", t39)
+
+    def t40():
+        anon = MCPClient(MCP_ENDPOINT, "nbapikey_invalid_token_00000000000000")
+        result = anon.call_tool("graphql_query", {"query": "{ devices { name } }"})
+        assert "data" in result
+        assert "errors" in result
+        # graphql_query returns dict with auth error, not exception
+        assert result["data"] is None, f"Anonymous should get no data, got: {result}"
+        assert result["errors"] is not None and len(result["errors"]) > 0
+        assert any(
+            "Authentication" in str(e) for e in (result["errors"] or [])
+        ), f"Expected auth error, got: {result['errors']}"
+        return {"anonymous_restricted": True}
+
+    runner.test("T-40 graphql_query anonymous token — auth error dict returned", t40)
+
+    def t41():
+        result = client.call_tool(
+            "graphql_query",
+            {"query": "query GetDevices($limit: Int!) { devices(first: $limit) { name } }", "variables": {"limit": 3}},
+        )
+        assert "data" in result
+        assert result["data"] is not None, f"Variables query failed: {result}"
+        return {"variables_working": True}
+
+    runner.test("T-41 graphql_query variables injection — data returned", t41)
+
+    def t42():
+        result = client.call_tool("graphql_query", {"query": "{ devices(first: 3) { name status } }"})
+        assert "data" in result
+        assert result["data"] is not None, "Valid token → data must not be None"
+        return {"token_authorized": True}
+
+    runner.test("T-42 graphql_query valid token — full data access", t42)
+
+    def t43():
+        # Depth > 8 → structured error dict
+        deep_query = "{ a { b { c { d { e { f { g { h { i } } } } } } } }"
+        result = client.call_tool("graphql_query", {"query": deep_query})
+        assert result["data"] is None, f"Depth error should return no data: {result}"
+        assert result["errors"] is not None and len(result["errors"]) > 0
+        assert any("depth" in str(e).lower() for e in result["errors"])
+        # Complexity > 1000 → structured error dict
+        many_fields = ", ".join(f"field{i}: name" for i in range(1001))
+        complex_query = f"{{ {many_fields} }}"
+        result2 = client.call_tool("graphql_query", {"query": complex_query})
+        assert result2["data"] is None
+        assert result2["errors"] is not None and len(result2["errors"]) > 0
+        assert any("complexity" in str(e).lower() for e in result2["errors"])
+        return {"depth_and_complexity_limits_enforced": True}
+
+    runner.test(
+        "T-43 graphql_query depth and complexity limits — structured errors dict, no data",
+        t43,
+    )
+
     # ---------------------------------------------------------------------------
     # Print results
     # ---------------------------------------------------------------------------
@@ -775,6 +880,7 @@ def run_uat() -> bool:
         "Get Tools": ["T-14", "T-15", "T-16", "T-17", "T-18", "T-19", "T-20", "T-21"],
         "Search": ["T-22", "T-23", "T-24", "T-25", "T-26"],
         "Auth Enforcement": ["T-27", "T-28", "T-29"],
+        "GraphQL Tools": ["T-37", "T-38", "T-39", "T-40", "T-41", "T-42", "T-43"],
         "Performance": ["P-01", "P-02", "P-03", "P-04", "P-05", "P-06", "P-07", "P-08"],
     }
 

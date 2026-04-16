@@ -155,6 +155,14 @@ convention = "google"
 "nautobot_app_mcp_server/mcp/commands.py" = [
     "S104",  # Host defaults to 0.0.0.0 for production; callers override as needed
 ]
+"scripts/*" = [
+    "D",
+    "S",
+]
+"tasks.py" = [
+    "F",
+    "D",
+]
 
 [tool.coverage.run]
 disable_warnings = ["already-imported"]
