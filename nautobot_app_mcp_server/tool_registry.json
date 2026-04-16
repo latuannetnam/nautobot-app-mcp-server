@@ -241,5 +241,18 @@
       ],
       "additionalProperties": false
     }
+  },
+  {
+    "name": "graphql_introspect",
+    "description": "Return the GraphQL schema as an SDL string. Auth token required \u2014 anonymous callers receive a tool error.",
+    "tier": "core",
+    "app_label": null,
+    "scope": "core",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
   }
 ]
