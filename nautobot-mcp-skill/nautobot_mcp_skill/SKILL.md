@@ -93,25 +93,29 @@ Both `data` and `errors` keys are always present. If a query succeeds with no er
 **Example — Simple device listing:**
 ```graphql
 query {
-  devices(first: 10) {
+  devices(limit: 10) {
     name
-    status
+    status {
+      name
+    }
   }
 }
 ```
 ```python
 result = mcp.call_tool("graphql_query", {
-    "query": "query { devices(first: 10) { name status } }"
+    "query": "query { devices(limit: 10) { name status { name } } }"
 })
-# → {"data": {"devices": [...]}, "errors": None}
+# → {"data": {"devices": [...]}, "errors": null}
 ```
 
 **Example — With variables:**
 ```graphql
 query GetDevices($limit: Int!) {
-  devices(first: $limit) {
+  devices(limit: $limit) {
     name
-    status
+    status {
+      name
+    }
     platform { name }
     location { name }
   }
@@ -119,10 +123,10 @@ query GetDevices($limit: Int!) {
 ```
 ```python
 result = mcp.call_tool("graphql_query", {
-    "query": "query GetDevices($limit: Int!) { devices(first: $limit) { name status } }",
+    "query": "query GetDevices($limit: Int!) { devices(limit: $limit) { name status { name } platform { name } location { name } } }",
     "variables": {"limit": 5}
 })
-# → {"data": {"devices": [...]}, "errors": None}
+# → {"data": {"devices": [...]}, "errors": null}
 ```
 
 ### graphql_introspect

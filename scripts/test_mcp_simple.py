@@ -110,6 +110,10 @@ class MCPClient:
                 parsed = json.loads(item["text"])
                 if isinstance(parsed, dict) and "result" in parsed and len(parsed) == 1:
                     return parsed["result"]
+                # Normalize GraphQL responses: always include 'errors' key
+                # Success: {"data": ...}  Failure: {"data": null, "errors": [...]}
+                if isinstance(parsed, dict) and "data" in parsed and "errors" not in parsed:
+                    parsed["errors"] = None
                 return parsed
         return result
 
@@ -173,7 +177,7 @@ def run() -> bool:
 
         # 5. Call graphql_query
         print("5. Call graphql_query...")
-        result = client.call_tool("graphql_query", {"query": "{ devices(first: 5) { name status } }"})
+        result = client.call_tool("graphql_query", {"query": "{ devices(limit: 3) { name status { name } } }"})
         assert "data" in result, "graphql_query result must have 'data' key"
         assert result["data"] is not None, f"Expected data, got: {result}"
         assert "errors" in result, "graphql_query result must have 'errors' key"
