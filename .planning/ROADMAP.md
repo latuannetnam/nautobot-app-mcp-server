@@ -160,7 +160,7 @@
 
 **Plans:**
 
-| # | Plan | Success Criteria |
+1/1 plans complete
 |---|------|-------------------|
 | 17.1 | Add smoke test P-09 to `scripts/test_mcp_simple.py` | `python scripts/test_mcp_simple.py` includes P-09 and exits with code 0 |
 | 17.2 | Add full UAT suite T-37+ (≥4 tests) to `scripts/run_mcp_uat.py` | `python scripts/run_mcp_uat.py` includes T-37, T-38, T-39, T-40; all pass |
