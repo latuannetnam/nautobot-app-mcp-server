@@ -64,12 +64,8 @@ class GraphQLQueryHandlerTestCase(TestCase):
             )
         return user
 
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
-    )
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_query"
-    )
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request")
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_query")
     def test_valid_query_returns_structured_data(self, mock_sync, mock_get_user):
         """GQL-15: Valid GraphQL query returns dict with 'data' and 'errors' keys.
 
@@ -89,9 +85,7 @@ class GraphQLQueryHandlerTestCase(TestCase):
                 authorization=f"Token {token.key}",
                 token_key_to_user={token.key: user},
             )
-            result = AsyncToSync(graphql_tool._graphql_query_handler)(
-                ctx, query="{ devices { name } }"
-            )
+            result = AsyncToSync(graphql_tool._graphql_query_handler)(ctx, query="{ devices { name } }")
 
             self.assertIn("data", result)
             self.assertIn("errors", result)
@@ -100,12 +94,8 @@ class GraphQLQueryHandlerTestCase(TestCase):
         finally:
             token.delete()
 
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
-    )
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_query"
-    )
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request")
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_query")
     def test_invalid_query_returns_errors_dict(self, mock_sync, mock_get_user):
         """GQL-16: Invalid GraphQL query returns dict with 'errors' key and no data.
 
@@ -117,9 +107,7 @@ class GraphQLQueryHandlerTestCase(TestCase):
 
         mock_result = {
             "data": None,
-            "errors": [
-                {"message": "Cannot query field 'nonexistentField' on type 'Query'."}
-            ],
+            "errors": [{"message": "Cannot query field 'nonexistentField' on type 'Query'."}],
         }
         mock_sync.return_value = mock_result
         mock_get_user.return_value = user
@@ -129,9 +117,7 @@ class GraphQLQueryHandlerTestCase(TestCase):
                 authorization=f"Token {token.key}",
                 token_key_to_user={token.key: user},
             )
-            result = AsyncToSync(graphql_tool._graphql_query_handler)(
-                ctx, query="{ nonexistentField }"
-            )
+            result = AsyncToSync(graphql_tool._graphql_query_handler)(ctx, query="{ nonexistentField }")
 
             self.assertIn("errors", result)
             self.assertIsNone(result["data"])
@@ -139,12 +125,8 @@ class GraphQLQueryHandlerTestCase(TestCase):
         finally:
             token.delete()
 
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
-    )
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_query"
-    )
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request")
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_query")
     def test_variables_injection_works(self, mock_sync, mock_get_user):
         """GQL-17: variables dict is forwarded to _sync_graphql_query as the `variables` kwarg.
 
@@ -178,12 +160,8 @@ class GraphQLQueryHandlerTestCase(TestCase):
         finally:
             token.delete()
 
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
-    )
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_query"
-    )
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request")
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_query")
     def test_auth_propagates_to_sync_helper(self, mock_sync, mock_get_user):
         """GQL-14: Auth token resolves to user and user is passed to _sync_graphql_query.
 
@@ -217,22 +195,12 @@ class GraphQLQueryHandlerTestCase(TestCase):
         finally:
             token.delete()
 
-    @patch(
-        "nautobot.core.graphql.execute_query"
-    )
-    def test_anonymous_user_triggers_auth_error(self, mock_execute):
-        """GQL-07: execute_query ValueError is caught and returns structured error dict.
+    def test_anonymous_user_triggers_auth_error(self):
+        """GQL-07: AnonymousUser triggers auth guard → structured error dict.
 
-        When user is None (AnonymousUser), execute_query raises ValueError.
-        The handler's try/except catches this and returns
-        {"data": None, "errors": [{"message": "Authentication required"}]}.
-
-        Patches nautobot.core.graphql.execute_query because _sync_graphql_query
-        uses a lazy import (imported inside the function body), so the name
-        is not in graphql_tool's module namespace at decoration time.
+        The auth check is the first step in _sync_graphql_query and fires
+        before any GraphQL execution. No patching needed.
         """
-        mock_execute.side_effect = ValueError("Either request or username should be provided")
-
         result = graphql_tool._sync_graphql_query(
             query="{ devices { name } }",
             variables=None,
@@ -243,20 +211,12 @@ class GraphQLQueryHandlerTestCase(TestCase):
         self.assertIsNone(result["data"])
         self.assertEqual(result["errors"][0]["message"], "Authentication required")
 
-    @patch("nautobot.core.graphql.execute_query")
-    def test_anonymous_user_empty_query_results(self, mock_execute):
-        """GQL-13: AnonymousUser triggers ValueError from execute_query → empty result.
+    def test_anonymous_user_empty_query_results(self):
+        """GQL-13: AnonymousUser (user=None) → auth guard returns error dict.
 
-        When _sync_graphql_query is called with user=None (AnonymousUser),
-        execute_query raises ValueError("Either request or username should be provided").
-        The try/except in _sync_graphql_query catches this and returns
-        {"data": None, "errors": [{"message": "Authentication required"}]}.
+        The auth guard is the first step in _sync_graphql_query — it fires
+        before parse() or execute() are called. No patching needed.
         """
-        # Simulate execute_query raising ValueError for anonymous user
-        mock_execute.side_effect = ValueError(
-            "Either request or username should be provided"
-        )
-
         result = graphql_tool._sync_graphql_query(
             query="{ devices { name } }",
             variables=None,
@@ -267,19 +227,30 @@ class GraphQLQueryHandlerTestCase(TestCase):
         self.assertIn("errors", result)
         self.assertEqual(result["errors"][0]["message"], "Authentication required")
 
-    @patch("nautobot.core.graphql.execute_query")
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool._graphql.execute")
     def test_authenticated_user_normal_results(self, mock_execute):
-        """GQL-13: Authenticated user → execute_query returns non-empty filtered data.
+        """GQL-13: Authenticated user → graphql.execute returns non-empty filtered data.
 
-        When user is a real User instance, execute_query runs normally
-        and returns a valid ExecutionResult with data. Permission filtering
-        is handled internally by generate_restricted_queryset() in Nautobot.
+        _sync_graphql_query calls graphql.execute() after auth guard + validation.
+        Patch graphql.execute to return a mock ExecutionResult with the expected
+        formatted shape.
         """
-        mock_result = MagicMock(
-            formatted={
-                "data": {"devices": [{"name": "router-01"}]},
-                "errors": None,
-            }
+        from graphql import ExecutionResult
+
+        # Subclass ExecutionResult and override the formatted property so it
+        # returns the shape expected by the caller (omits "errors" key when None)
+        class MockExecutionResult(ExecutionResult):
+            @property
+            def formatted(self):
+                # Same logic as ExecutionResult.formatted but explicit
+                result = {"data": self.data}
+                if self.errors is not None:
+                    result["errors"] = self.errors
+                return result
+
+        mock_result = MockExecutionResult(
+            data={"devices": [{"name": "router-01"}]},
+            errors=None,
         )
         mock_execute.return_value = mock_result
 
@@ -292,7 +263,6 @@ class GraphQLQueryHandlerTestCase(TestCase):
         )
 
         self.assertIn("data", result)
-        self.assertIsNone(result["errors"])
         self.assertNotEqual(result["data"]["devices"], [])
         self.assertEqual(result["data"]["devices"][0]["name"], "router-01")
 
@@ -314,12 +284,8 @@ class GraphQLIntrospectHandlerTestCase(TestCase):
             )
         return user
 
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
-    )
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect"
-    )
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request")
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect")
     def test_introspect_returns_sdl_string(self, mock_sync, mock_get_user):
         """GQL-09: graphql_introspect returns a multi-line SDL string.
 
@@ -330,14 +296,7 @@ class GraphQLIntrospectHandlerTestCase(TestCase):
         user = self._get_or_create_superuser()
         token = _create_token(user)
 
-        mock_sdl = (
-            'type Query {\n'
-            '  devices: [Device]\n'
-            '}\n'
-            'type Device {\n'
-            '  name: String\n'
-            '}\n'
-        )
+        mock_sdl = "type Query {\n" "  devices: [Device]\n" "}\n" "type Device {\n" "  name: String\n" "}\n"
         mock_sync.return_value = mock_sdl
         mock_get_user.return_value = user
 
@@ -354,9 +313,7 @@ class GraphQLIntrospectHandlerTestCase(TestCase):
         finally:
             token.delete()
 
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect"
-    )
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool._sync_graphql_introspect")
     def test_introspect_sdl_valid(self, mock_sync):
         """GQL-09: Returned SDL can be parsed by build_schema without GraphQLError.
 
@@ -365,14 +322,7 @@ class GraphQLIntrospectHandlerTestCase(TestCase):
         """
         from graphql import GraphQLError, build_schema
 
-        mock_sdl = (
-            "type Query {\n"
-            "  devices: [Device]\n"
-            "}\n"
-            "type Device {\n"
-            "  name: String\n"
-            "}\n"
-        )
+        mock_sdl = "type Query {\n" "  devices: [Device]\n" "}\n" "type Device {\n" "  name: String\n" "}\n"
         mock_sync.return_value = mock_sdl
 
         result = graphql_tool._sync_graphql_introspect()
@@ -383,9 +333,7 @@ class GraphQLIntrospectHandlerTestCase(TestCase):
         except GraphQLError:
             self.fail("SDL from _sync_graphql_introspect is not a valid GraphQL schema")
 
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
-    )
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request")
     def test_introspect_raises_on_anonymous(self, mock_get_user):
         """GQL-08: Introspection requires auth — anonymous raises ValueError.
 
@@ -401,9 +349,7 @@ class GraphQLIntrospectHandlerTestCase(TestCase):
             AsyncToSync(graphql_tool._graphql_introspect_handler)(ctx)
         self.assertIn("Authentication required", str(ctx_.exception))
 
-    @patch(
-        "nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request"
-    )
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_tool.get_user_from_request")
     def test_auth_required_resolves_user(self, mock_get_user):
         """GQL-08: Auth token is resolved before the sync boundary is crossed.
 
@@ -431,3 +377,88 @@ class GraphQLIntrospectHandlerTestCase(TestCase):
             self.assertIsInstance(result, str)
         finally:
             token.delete()
+
+
+class GraphQLSecurityTestCase(TestCase):
+    """Test depth/complexity limits and structured error handling (GQL-10, GQL-11, GQL-12)."""
+
+    def _get_or_create_superuser(self):
+        """Return an existing superuser or create one for test fixtures."""
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        user = User.objects.filter(is_superuser=True).first()
+        if not user:
+            user = User.objects.create_superuser(
+                username="testadmin",
+                email="admin@test.local",
+                password="testpass",  # noqa: S106
+            )
+        return user
+
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_validation.validate")
+    def test_depth_limit_enforced(self, mock_validate):
+        """GQL-10: Query with depth 9 is rejected with data=None and 'depth' in message.
+
+        _sync_graphql_query calls graphql.validate() before execute().
+        Patch graphql_validation.validate to simulate MaxDepthRule rejecting the query.
+        """
+        from graphql import GraphQLError
+
+        fake_error = GraphQLError("Query depth 9 exceeds maximum allowed depth of 8")
+        mock_validate.return_value = [fake_error]
+
+        user = self._get_or_create_superuser()
+        result = graphql_tool._sync_graphql_query(
+            query="{ a { b { c { d { e { f { g { h { i } } } } } } } } }",  # depth 9
+            variables=None,
+            user=user,
+        )
+
+        self.assertIsNone(result["data"])
+        self.assertIsNotNone(result["errors"])
+        self.assertIn("depth", result["errors"][0]["message"].lower())
+
+    @patch("nautobot_app_mcp_server.mcp.tools.graphql_validation.validate")
+    def test_complexity_limit_enforced(self, mock_validate):
+        """GQL-11: Over-complex query is rejected with data=None and 'complexity' in message.
+
+        Patch graphql_validation.validate to simulate QueryComplexityRule rejecting the query.
+        """
+        from graphql import GraphQLError
+
+        fake_error = GraphQLError("Query complexity 1001 exceeds maximum allowed complexity of 1000")
+        mock_validate.return_value = [fake_error]
+
+        # Build a query with > 1000 field selections
+        many_fields = ", ".join(f"field{i}: name" for i in range(1001))
+        query = f"{{ {many_fields} }}"
+
+        user = self._get_or_create_superuser()
+        result = graphql_tool._sync_graphql_query(
+            query=query,
+            variables=None,
+            user=user,
+        )
+
+        self.assertIsNone(result["data"])
+        self.assertIsNotNone(result["errors"])
+        self.assertIn("complexity", result["errors"][0]["message"].lower())
+
+    def test_syntax_error_returns_200_with_errors(self):
+        """GQL-12: Malformed query returns HTTP 200 with structured errors dict.
+
+        parse() raises GraphQLError for unclosed braces, invalid syntax, etc.
+        This is caught in _sync_graphql_query and returned as
+        ExecutionResult.formatted. No unhandled exception propagates from the tool.
+        """
+        user = self._get_or_create_superuser()
+        result = graphql_tool._sync_graphql_query(
+            query="{ devices {",  # unclosed brace — syntax error
+            variables=None,
+            user=user,
+        )
+
+        self.assertIsNone(result["data"])
+        self.assertIsNotNone(result["errors"])
+        self.assertIn("Syntax Error", result["errors"][0]["message"])

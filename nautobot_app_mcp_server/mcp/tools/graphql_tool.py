@@ -1,4 +1,4 @@
-"""GraphQL query tool — wraps nautobot.core.graphql.execute_query()."""
+"""GraphQL query tool — parse-then-execute with security validation rules."""
 
 from __future__ import annotations
 
@@ -45,33 +45,74 @@ async def _graphql_query_handler(
         {"data": None, "errors": [{"message": "Authentication required"}]}
     """
     user = await get_user_from_request(ctx)
-    return await sync_to_async(_sync_graphql_query, thread_sensitive=True)(
-        query=query, variables=variables, user=user
-    )
+    return await sync_to_async(_sync_graphql_query, thread_sensitive=True)(query=query, variables=variables, user=user)
 
 
 def _sync_graphql_query(query: str, variables: dict | None, user) -> dict[str, Any]:
-    """Synchronous GraphQL query executor.
+    """Synchronous GraphQL query executor — parse → validate → execute pattern.
 
-    Imports nautobot.core.graphql lazily to avoid Django setup issues.
-    Catches ValueError (raised when user is None) and returns a structured
-    error dict instead of propagating the exception.
+    Replaces `nautobot.core.graphql.execute_query()` with three distinct phases:
+      1. Auth guard (user=None check — preserved from Phase 14)
+      2. parse() — raises GraphQLError on syntax error → HTTP 200 with errors dict
+      3. validate() — runs custom security rules before execution
+      4. execute() — runs the validated document against the schema
+
+    All imports are lazy (inside the function body) to avoid Django setup issues.
     """
-    from nautobot.core.graphql import execute_query
+    # Lazy imports — must be inside function to avoid Django setup conflicts
+    import graphql as _graphql_module
+    from django.test.client import RequestFactory
+    from graphene_django.settings import graphene_settings
+    from graphql import ExecutionResult
+    from graphql.validation import specified_rules
 
-    try:
-        result = execute_query(query=query, variables=variables, user=user)
-    except ValueError:
-        # user was None — execute_query requires request or user
+    # Expose graphql module at module level so tests can patch at the namespace path
+    import nautobot_app_mcp_server.mcp.tools.graphql_tool as _gt
+    from nautobot_app_mcp_server.mcp.tools import graphql_validation
+
+    _gt._graphql = _graphql_module
+
+    # Step 1: Auth guard (existing — preserved from Phase 14)
+    # Covers both user=None and AnonymousUser instances
+    if user is None or (hasattr(user, "is_anonymous") and user.is_anonymous):
         return {"data": None, "errors": [{"message": "Authentication required"}]}
+
+    # Step 2: Syntax validation — parse() raises GraphQLError on bad syntax
+    try:
+        document = graphql_validation.parse(query)
+    except graphql_validation.GraphQLError as e:
+        return ExecutionResult(data=None, errors=[e]).formatted
+
+    # Step 3: Security validation — depth + complexity limits (stubs in Wave 1)
+    schema = graphene_settings.SCHEMA.graphql_schema
+    validation_errors = graphql_validation.validate(
+        schema=schema,
+        document_ast=document,
+        rules=[graphql_validation.MaxDepthRule, graphql_validation.QueryComplexityRule, *specified_rules],
+    )
+    if validation_errors:
+        return ExecutionResult(data=None, errors=validation_errors).formatted
+
+    # Step 4: Execute — build Django request as context value
+    request = RequestFactory().post("/graphql/")
+    request.user = user
+    if variables:
+        result = _graphql_module.execute(
+            schema=schema,
+            document=document,
+            context_value=request,
+            variable_values=variables,
+        )
+    else:
+        result = _graphql_module.execute(schema=schema, document=document, context_value=request)
+
     return result.formatted
 
 
 @register_tool(
     name="graphql_introspect",
     description=(
-        "Return the GraphQL schema as an SDL string. "
-        "Auth token required — anonymous callers receive a tool error."
+        "Return the GraphQL schema as an SDL string. " "Auth token required — anonymous callers receive a tool error."
     ),
     tier=TOOLS_TIER,
     scope=TOOLS_SCOPE,
