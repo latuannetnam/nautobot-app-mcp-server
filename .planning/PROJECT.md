@@ -2,11 +2,11 @@
 
 ## What This Is
 
-A Nautobot App that exposes a Model Context Protocol (MCP) server as a standalone FastMCP process (separate from Nautobot's Django process), enabling AI agents (Claude Code, Claude Desktop) to interact with Nautobot data via MCP tools. The MCP server runs on port 8005, uses direct Django ORM, and supports progressive disclosure of tools — 13 core tools always available.
+A Nautobot App that exposes a Model Context Protocol (MCP) server as a standalone FastMCP process (separate from Nautobot's Django process), enabling AI agents (Claude Code, Claude Desktop) to interact with Nautobot data via MCP tools. The MCP server runs on port 8005, uses direct Django ORM, and supports progressive disclosure of tools — 13 core tools always available, with GraphQL access via `graphql_query` and `graphql_introspect`.
 
 ## Core Value
 
-AI agents can query Nautobot network inventory data via MCP tools with full Nautobot permission enforcement, zero extra network hops, and progressive tool discovery.
+AI agents can query Nautobot network inventory data via MCP tools with full Nautobot permission enforcement, zero extra network hops, and progressive tool discovery — now including arbitrary GraphQL access.
 
 ## Requirements
 
@@ -16,33 +16,38 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 - [x] `start_mcp_dev_server.py` — `create_app()` factory + uvicorn with auto-reload — v1.2.0
 - [x] `tool_registry.json` — cross-process discovery; written by plugin `ready()`, read by MCP server `create_app()` at startup — v1.2.0
 - [x] `@register_tool` decorator — auto-generates JSON Schema from Python type hints; dual registration (in-memory `MCPToolRegistry` + FastMCP) — v1.2.0
-- [x] 13 Core tools: 10 read tools + 3 meta tools (mcp_enable_tools, mcp_disable_tools, mcp_list_tools) — v1.0/v1.2.0
+- [x] 15 Core tools: 10 read tools + 3 meta tools + 2 GraphQL tools — v1.0/v2.0
 - [x] Session state via FastMCP `ctx.get_state()`/`ctx.set_state()` (no monkey-patching) — v1.2.0
 - [x] Auth: token from FastMCP request headers, cached via `ctx.set_state("mcp:cached_user")` — v1.2.0
 - [x] Nautobot token auth + object-level permissions via `.restrict(user, action="view")` — v1.0
 - [x] Cursor-based pagination (limit default=25, max=1000) — v1.0
 - [x] `nautobot-mcp-skill` SKILL.md package with tool reference — v1.0
+- [x] `graphql_query` MCP tool — arbitrary GraphQL queries via `nautobot.core.graphql.execute_query()` — v2.0
+- [x] `graphql_introspect` MCP tool — returns Nautobot schema as SDL string — v2.0
+- [x] Query depth limit (≤8) and complexity limit (≤1000) — v2.0
+- [x] Structured GraphQL errors (HTTP 200, `{"data": null, "errors": [...]}`) — v2.0
 
 ### Active
 
-- [ ] Write tools (create/update/delete) — deferred to v2.0
-- [ ] Redis session backend for `--workers > 1` horizontal scaling — deferred to v2.0
+- [ ] Write tools (create/update/delete) — deferred to v3.0
+- [ ] Redis session backend for `--workers > 1` horizontal scaling — deferred to v3.0
 
 ### Out of Scope
 
-- Write tools — deferred to v2 (permission surface widens significantly)
+- Write tools — deferred to v3.0 (permission surface widens significantly)
 - MCP `resources` or `prompts` endpoints — focus is tools first
 - Tool-level field permissions — deferred
 
 ## Context
 
-**Current state (v1.2.0 shipped):**
+**Current state (v2.0 shipped):**
 - MCP server: standalone FastMCP process on port 8005, managed via Docker Compose `mcp-server` service
 - `invoke start` launches both Nautobot (8080) and MCP server (8005) automatically
-- 13 tools registered: 10 read (device, interface, ipaddress, prefix, vlan, location, search) + 3 meta
+- 15 tools registered: 10 read (device, interface, ipaddress, prefix, vlan, location, search) + 3 meta + 2 GraphQL
 - Auth: Nautobot API token via `Authorization: Token <hex>` header; user cached per FastMCP session
-- Unit tests: 91/91 pass (89 pass, 2 skipped); UAT: 37/37 pass
-- Tech stack: FastMCP 3.2.0, uvicorn, Django ORM via `sync_to_async(thread_sensitive=True)`
+- GraphQL: `graphql_query` (arbitrary queries) + `graphql_introspect` (schema SDL), both depth/complexity limited
+- Unit tests: 103/103 pass; UAT: 44/44 passed
+- Tech stack: FastMCP 3.2.0, uvicorn, Django ORM via `sync_to_async(thread_sensitive=True)`, graphql-core 3.2.8
 
 **v1.0/v1.1 legacy (deleted in v1.2.0):**
 - `view.py`, `server.py`, `urls.py` — WSGI→ASGI bridge removed
@@ -60,17 +65,26 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 | Session state via FastMCP `ctx.get_state()`/`ctx.set_state()` | `ServerSession` has no dict interface; `MemoryStore` is the native FastMCP API | ✅ Shipped v1.2.0 |
 | Cursor separator `@` not `.` | UUIDs contain dots; base64-encoded cursor would split UUID at wrong position | ✅ Shipped v1.2.0 |
 | `--workers 1` documented | In-memory sessions; multi-worker requires Redis backend (v2.0) | ✅ Shipped v1.2.0 |
+| Reuse `nautobot.core.graphql.execute_query()` | Stable since Nautobot 1.x; handles permissions internally; avoids duplicating `extend_schema_type` dynamic features | ✅ Shipped v2.0 |
+| Reuse `nautobot.core.graphql.schema` | Parallel schema misses Nautobot's custom fields, tags, computed fields | ✅ Shipped v2.0 |
+| Depth ≤8, Complexity ≤1000 | Conservative defaults; prevents deeply-nested and expensive DoS without blocking useful queries | ✅ Shipped v2.0 |
+| `graphql_introspect` as separate tool | Returns schema SDL so AI agents discover available types/fields without out-of-band docs | ✅ Shipped v2.0 |
+| Structured errors, not HTTP 500s | GraphQL errors returned as `errors` array; syntax errors never throw unhandled exceptions | ✅ Shipped v2.0 |
+| No new poetry dependencies | All required packages (graphene-django, graphql-core) are already Nautobot transitive deps | ✅ Shipped v2.0 |
 
 ---
 
-## Current Milestone: v2.0 GraphQL MCP Tool
+## Current Milestone: v3.0 — Future Planning
 
-**Goal:** Add a GraphQL MCP tool using graphene-django to query Nautobot data, with UAT tests following the same pattern as `scripts/test_mcp_simple.py`.
+**Status:** Not started. Run `/gsd-new-milestone` to define scope.
 
-**Target features:**
-- GraphQL MCP tool (graphene-django) to query Nautobot data via GraphQL
-- UAT tests following `scripts/test_mcp_simple.py` pattern
-- GraphQL endpoint integration with MCP server
+**Candidate features:**
+
+- Write tools (create/update/delete) — requires permission modeling and transactional safety
+- Redis session backend for `--workers > 1` horizontal scaling
+- Tool-level field permissions
+- Dry-run / validation mode for GraphQL queries
+- Query result caching (TTL cache keyed on `user_pk + query_hash`)
 
 ## Evolution
 
@@ -93,4 +107,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-*Last updated: 2026-04-15 — v2.0 milestone started*
+*Last updated: 2026-04-17 after v2.0 GraphQL MCP Tool milestone shipped*
