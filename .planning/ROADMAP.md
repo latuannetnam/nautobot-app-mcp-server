@@ -123,7 +123,7 @@
 
 **Plans:**
 
-| # | Plan | Success Criteria |
+3/3 plans complete
 |---|------|-------------------|
 | 15.1 | Create `graphql_introspect` MCP tool returning GraphQL SDL string | Tool registered; calling it returns a multi-line SDL string; introspection succeeds without auth |
 | 15.2 | Verify permission enforcement: `AnonymousUser` → empty results, authenticated user → filtered results | Integration test passes; restricted user gets zero rows on all queries; permitted user gets ≥1 row |
