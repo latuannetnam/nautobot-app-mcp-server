@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nautobot-app-mcp-server"
-version = "0.2.0"
+version = "1.2.0"
 description = "Nautobot MCP Server App"
 authors = ["Le Anh Tuan <latuannetnam@gmail.com>"]
 license = "Apache-2.0"
@@ -35,11 +35,10 @@ nautobot = ">=3.0.0,<4.0.0"
 # MCP server layer
 fastmcp = "^3.2.0"
 
-# REST API client for production data import
-python-dotenv = "*"
-requests = "*"
-
+# REST API client (used only by UAT scripts in scripts/, not shipped in Docker image)
 [tool.poetry.group.dev.dependencies]
+requests = "*"
+python-dotenv = "*"
 coverage = "*"
 django-debug-toolbar = "*"
 invoke = "*"
@@ -106,7 +105,7 @@ notes = """,
 
 [tool.ruff]
 line-length = 120
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
