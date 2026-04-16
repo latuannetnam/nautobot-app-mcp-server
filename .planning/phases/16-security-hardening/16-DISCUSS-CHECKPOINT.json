@@ -1,0 +1,57 @@
+{
+  "phase": "16",
+  "phase_name": "Security Hardening",
+  "timestamp": "2026-04-16T00:00:00Z",
+  "areas_completed": ["Limit enforcement location", "Depth/complexity strategy", "Error response format", "Unit test approach"],
+  "areas_remaining": [],
+  "decisions": {
+    "Limit enforcement location": [
+      {
+        "question": "Where should depth and complexity limits be enforced?",
+        "answer": "Parse-then-execute in _sync_graphql_query (recommended)",
+        "options_presented": [
+          "Parse-then-execute in _sync_graphql_query (recommended)",
+          "New wrapper function",
+          "Patch execute_query import"
+        ]
+      }
+    ],
+    "Depth/complexity strategy": [
+      {
+        "question": "How should we implement the two limits?",
+        "answer": "Two custom ASTValidationRules (recommended)",
+        "options_presented": [
+          "Two custom ASTValidationRules (recommended)",
+          "Library for depth, custom for complexity"
+        ]
+      }
+    ],
+    "Error response format": [
+      {
+        "question": "How should over-limit error responses look?",
+        "answer": "ExecutionResult.formatted dict (recommended)",
+        "options_presented": [
+          "ExecutionResult.formatted dict (recommended)",
+          "Plain dict error"
+        ]
+      }
+    ],
+    "Unit test approach": [
+      {
+        "question": "How should we structure the unit tests?",
+        "answer": "Add to test_graphql_tool.py (recommended)",
+        "options_presented": [
+          "Add to test_graphql_tool.py (recommended)",
+          "New test_graphql_security.py"
+        ]
+      }
+    ]
+  },
+  "deferred_ideas": [],
+  "canonical_refs": [
+    ".planning/REQUIREMENTS.md",
+    ".planning/ROADMAP.md",
+    ".planning/phases/14-graphql-tool-scaffold/14-CONTEXT.md",
+    ".planning/phases/15-introspection-permissions/15-CONTEXT.md"
+  ]
+}
