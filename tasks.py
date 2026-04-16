@@ -1052,6 +1052,7 @@ def validate_app_config(context):
 # UAT / IMPORT
 # ------------------------------------------------------------------------------
 
+
 @task(
     help={
         "dry-run": "Preview what would be imported without writing to the database (default: False)",
@@ -1169,7 +1170,6 @@ def reset_dev_db(context):
         print("[WARN] Running locally — reset-dev-db requires Docker Compose")
         sys.exit(1)
 
-    import sys as _sys  # noqa: N813
 
     # Re-import if requested
     import_arg = None
