@@ -224,7 +224,7 @@ def build_device_qs() -> QuerySet[Device]:
         "platform",
         "location",
         "tenant",
-    )
+    ).order_by("pk")
 
 
 def build_interface_qs() -> QuerySet[Interface]:
@@ -239,7 +239,7 @@ def build_interface_qs() -> QuerySet[Interface]:
         "parent_interface",
         "bridge",
         "untagged_vlan",
-    )
+    ).order_by("pk")
 
 
 def build_interface_qs_with_ip_addresses() -> QuerySet[Interface]:
@@ -256,7 +256,7 @@ def build_ipaddress_qs() -> QuerySet[IPAddress]:
     return IPAddress.objects.select_related(
         "status",
         "tenant",
-    )
+    ).order_by("pk")
 
 
 def build_ipaddress_qs_with_interfaces() -> QuerySet[IPAddress]:
@@ -274,7 +274,7 @@ def build_prefix_qs() -> QuerySet[Prefix]:
         "status",
         "role",
         "tenant",
-    ).prefetch_related("locations", "vrfs")
+    ).prefetch_related("locations", "vrfs").order_by("pk")
 
 
 def build_vlan_qs() -> QuerySet[VLAN]:
@@ -286,7 +286,7 @@ def build_vlan_qs() -> QuerySet[VLAN]:
         "role",
         "tenant",
         "vlan_group",
-    ).prefetch_related("locations")
+    ).prefetch_related("locations").order_by("pk")
 
 
 def build_location_qs() -> QuerySet[Location]:
@@ -298,7 +298,7 @@ def build_location_qs() -> QuerySet[Location]:
         "location_type",
         "parent",
         "tenant",
-    )
+    ).order_by("pk")
 
 
 # -------------------------------------------------------------------
