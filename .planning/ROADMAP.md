@@ -141,7 +141,7 @@
 
 **Plans:**
 
-| # | Plan | Success Criteria |
+1/1 plans complete
 |---|------|-------------------|
 | 16.1 | Enforce query depth limit (max_depth ≤ 8) | Deeply nested query (9+ levels) returns `{"errors": [{"message": "..."}]}` with no data |
 | 16.2 | Enforce query complexity limit (max_complexity ≤ 1000) | Over-complex query returns `{"errors": [{"message": "..."}]}` with no data |
