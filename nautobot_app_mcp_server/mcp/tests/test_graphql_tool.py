@@ -243,7 +243,6 @@ class GraphQLQueryHandlerTestCase(TestCase):
         self.assertIsNone(result["data"])
         self.assertEqual(result["errors"][0]["message"], "Authentication required")
 
-<<<<<<< HEAD
     @patch("nautobot.core.graphql.execute_query")
     def test_anonymous_user_empty_query_results(self, mock_execute):
         """GQL-13: AnonymousUser triggers ValueError from execute_query → empty result.
@@ -567,4 +566,3 @@ class GraphQLIntrospectHandlerTestCase(TestCase):
             self.assertIsInstance(result, str)
         finally:
             token.delete()
->>>>>>> 1ce0f41 (feat(15): add graphql_introspect MCP tool returning GraphQL SDL)
