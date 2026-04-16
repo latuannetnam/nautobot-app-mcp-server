@@ -1,62 +1,43 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2.0
-milestone_name: Archived
-status: executing
-last_updated: "2026-04-16T23:45:38.843Z"
-last_activity: 2026-04-16
+milestone: v3.0
+milestone_name: Future Planning
+status: planning
+last_updated: "2026-04-17"
+last_activity: 2026-04-17
 progress:
-  total_phases: 5
-  completed_phases: 2
-  total_plans: 4
-  completed_plans: 6
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-15 (v2.0 roadmap created)
+**Last updated:** 2026-04-17 (v2.0 GraphQL MCP Tool shipped)
 
 ---
 
 ## Current Position
 
-Phase: 17
-Plan: Not started
-Status: Ready to execute
+v2.0 milestone complete. Ready for v3.0 planning.
 
-Last activity: 2026-04-16
-
-Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Phase 9 executing (2/6 plans)
-
-**Phase 09-04 completed** (`09-PLAN-04-SUMMARY.md`):
-
-- Confirmed all 10 core read tools use `async def` + `sync_to_async(thread_sensitive=True)` pattern
-- `grep -c "^async def _"` returns 10 ✓
-- `grep -c "sync_to_async(query_utils._sync_"` returns 10 ✓
-- No module-level Django model imports in `core.py` ✓
-- `ToolContext` imported from `fastmcp.server.context` ✓
-
-**Phase 09-01 completed** (`09-01-SUMMARY.md`):
-
-- `schema.py`: `func_signature_to_input_schema()` auto-derives JSON Schema from Python type hints
-- `@register_tool` decorator in `mcp/__init__.py`: ergonomic wrapper with auto-schema
-- All 10 core tools in `core.py` converted to `@register_tool` (net: 54 insertions, 245 deletions)
-- All 80 MCP tests pass
+**Next action:** `/gsd-new-milestone` to define v3.0 scope.
 
 ---
 
 ## Milestone Summary
 
-**v2.0 (GraphQL MCP Tool) — PLANNED**
+**v2.0 (GraphQL MCP Tool) — SHIPPED 2026-04-16**
 
-- `graphql_query` MCP tool wrapping `nautobot.core.graphql.execute_query()` with `sync_to_async(thread_sensitive=True)`
-- `graphql_introspect` companion tool returning GraphQL schema SDL
-- Auth propagated to GraphQL execution context via `get_user_from_request()`
-- Query depth limit (≤8) and complexity limit (≤1000) to prevent DoS
-- Structured error handling — no HTTP 500s for GraphQL errors
-- 15 unit tests across 4 phases; UAT smoke test P-09 + full suite T-37+
-- SKILL.md updated with `graphql_query` and `graphql_introspect` documentation
+- `graphql_query` MCP tool: arbitrary GraphQL queries via `nautobot.core.graphql.execute_query()`
+- `graphql_introspect` MCP tool: returns Nautobot schema as SDL string
+- `graphql_validation.py`: `MaxDepthRule` (depth ≤8) and `QueryComplexityRule` (complexity ≤1000)
+- Structured error handling: all GraphQL errors return HTTP 200 with `{"data": null, "errors": [...]}`
+- UAT: 44/44 passed (T-06 cursor pagination fixed post-ship)
+- SKILL.md updated | 103 unit tests pass | No new poetry dependencies
+- Phase 17 code review: 10 findings (Critical ×1, High ×1, Medium ×2, Low ×6) all fixed before close
 
 **v1.2.0 (Separate Process Refactor) — SHIPPED 2026-04-07**
 
@@ -69,14 +50,12 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 - Auth: token from FastMCP headers, cached via `ctx.set_state("mcp:cached_user")`
 - Embedded architecture deleted: `view.py`, `server.py`, `urls.py` removed
 - UAT: 37/37 passed | Unit tests: 91/91 passed (89 pass, 2 skipped)
-- FastMCP/MCP SDK `outputSchema` conflict fixed via `output_schema=None` in source
 
 **v1.1.0 (MCP Server Refactor) — SHIPPED 2026-04-04**
 
 - Embedded FastMCP bridge: `async_to_sync` + `session_manager.run()`
 - Session state on `RequestContext._mcp_tool_state`
 - Auth caching on `_cached_user`
-- Progressive disclosure via `mcp._list_tools_mcp` override
 
 **v1.0 MVP — SHIPPED 2026-04-02**
 
@@ -88,10 +67,10 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 
 | Phase | Name | Status | Completed |
 |---|---|---|---|
-| 14 | GraphQL Tool Scaffold | Complete | — |
-| 15 | Introspection & Permissions | Complete | 2026-04-16 |
-| 16 | Security Hardening | Context gathered | — |
-| 17 | UAT & Documentation | Context gathered | 2026-04-16 |
+| 14 | GraphQL Tool Scaffold | Complete | 2026-04-15 |
+| 15 | Introspection & Permissions | Complete | 2026-04-15 |
+| 16 | Security Hardening | Complete | 2026-04-16 |
+| 17 | UAT & Documentation | Complete | 2026-04-16 |
 
 ---
 
@@ -102,16 +81,15 @@ Progress: [▓▓▓▓▓▓▓▓▓▓] Phase 8 complete (4/4 sub-plans); Pha
 | v1.0 | 2026-04-02 | Phases 0–4 | MVP shipped |
 | v1.1.0 | 2026-04-04 | Phases 5–6 | Embedded FastMCP refactor |
 | v1.2.0 | 2026-04-07 | Phases 7–13 | Separate process refactor |
-| v2.0 | 2026-04-15 | Phases 14–17 | GraphQL MCP Tool (planned) |
+| v2.0 | 2026-04-16 | Phases 14–17 | GraphQL MCP Tool |
 
 ---
 
 ## Next Steps
 
-- Begin Phase 15 — Introspection & Permissions
-- Implement `graphql_introspect` MCP tool in `mcp/tools/graphql_tool.py`
-- Write unit tests for introspection and permission enforcement
+- Run `/gsd-new-milestone` to define v3.0 scope
+- Candidate features: Write tools, Redis session backend, tool-level field permissions
 
 ---
 
-*State last updated: 2026-04-15*
+*State last updated: 2026-04-17*
