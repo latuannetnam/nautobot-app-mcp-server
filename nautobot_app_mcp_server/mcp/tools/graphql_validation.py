@@ -18,6 +18,8 @@ from graphql.validation import ValidationContext, ValidationRule
 
 MAX_DEPTH = 8
 MAX_COMPLEXITY = 1000
+# __typename is excluded from depth (adds no nesting) but included in complexity
+# (it is a field and consumes execution resources) per design decision D-02.
 _INTROSPECTION_FIELDS = frozenset({"__schema", "__type", "__typename"})
 
 __all__ = ["MaxDepthRule", "QueryComplexityRule", "validate", "parse"]

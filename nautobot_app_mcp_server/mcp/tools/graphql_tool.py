@@ -60,17 +60,18 @@ def _sync_graphql_query(query: str, variables: dict | None, user) -> dict[str, A
     All imports are lazy (inside the function body) to avoid Django setup issues.
     """
     # Lazy imports — must be inside function to avoid Django setup conflicts
-    import graphql as _graphql_module
     from django.test.client import RequestFactory
     from graphene_django.settings import graphene_settings
     from graphql import ExecutionResult
     from graphql.validation import specified_rules
 
-    # Expose graphql module at module level so tests can patch at the namespace path
-    import nautobot_app_mcp_server.mcp.tools.graphql_tool as _gt
     from nautobot_app_mcp_server.mcp.tools import graphql_validation
 
-    _gt._graphql = _graphql_module
+    # Initialise _graphql lazily once (module-level so tests can patch the attribute)
+    import nautobot_app_mcp_server.mcp.tools.graphql_tool as _self
+    if not hasattr(_self, "_graphql") or _self._graphql is None:  # pragma: no cover
+        import graphql as _graphql_module
+        _self._graphql = _graphql_module
 
     # Step 1: Auth guard (existing — preserved from Phase 14)
     # Covers both user=None and AnonymousUser instances
@@ -97,14 +98,14 @@ def _sync_graphql_query(query: str, variables: dict | None, user) -> dict[str, A
     request = RequestFactory().post("/graphql/")
     request.user = user
     if variables:
-        result = _graphql_module.execute(
+        result = _self._graphql.execute(
             schema=schema,
             document=document,
             context_value=request,
             variable_values=variables,
         )
     else:
-        result = _graphql_module.execute(schema=schema, document=document, context_value=request)
+        result = _self._graphql.execute(schema=schema, document=document, context_value=request)
 
     return result.formatted
 
