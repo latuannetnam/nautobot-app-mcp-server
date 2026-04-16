@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 # Configuration
 # ---------------------------------------------------------------------------
 
-ENV_FILE = Path(__file__).parent.parent / "nautobot_import.env"
+ENV_FILE = Path(__file__).parent.parent / "development" / "creds.env"
 if ENV_FILE.exists():
     load_dotenv(ENV_FILE)
 
@@ -170,7 +170,7 @@ class MCPClient:
                 (item.get("text", "") for item in content if item.get("type") == "text"),
                 "Unknown error",
             )
-            raise MCPToolError(-32602, error_text)
+            raise MCPToolError(code=-32602, message=error_text)
 
         for item in content:
             if item.get("type") == "text":
@@ -237,7 +237,7 @@ class TestRunner:
         self.client = client
         self.results: list[TestResult] = []
 
-    def test(self, name: str, fn, expected_error: type | None = None):
+    def test(self, name: str, fn):
         """Run a test function, capturing result and timing."""
         result = TestResult(name)
         t0 = time.perf_counter()
@@ -245,10 +245,7 @@ class TestRunner:
             rv = fn()
             result.ok(rv, duration_ms=(time.perf_counter() - t0) * 1000)
         except MCPToolError as e:
-            if expected_error and e.code == expected_error.code:
-                result.ok(duration_ms=(time.perf_counter() - t0) * 1000)
-            else:
-                result.fail(f"MCP Error [{e.code}]: {e.message}")
+            result.fail(f"MCP Error [{e.code}]: {e.message}")
         except Exception as e:  # noqa: BLE001
             result.fail(str(e))
         self.results.append(result)
@@ -642,7 +639,7 @@ def run_uat() -> bool:
 
     def t27():
         # Anonymous client (no token)
-        anon = MCPClient(MCP_ENDPOINT, "nbapikey_invalid_token_00000000000000")
+        anon = MCPClient(MCP_ENDPOINT, "a" * 40)
         result = anon.call_tool("device_list", {"limit": 5})
         # Must return empty, not error
         assert result.get("items") == [], f"Expected empty items for anonymous, got: {result}"
@@ -651,16 +648,17 @@ def run_uat() -> bool:
     runner.test("T-27 Anonymous (no/invalid token) — empty results, no error", t27)
 
     def t28():
-        # Valid token (should return non-empty if data imported)
+        # Valid token — assert data is present (DB must be populated)
         result = client.call_tool("device_list", {"limit": 5})
         has_data = len(result.get("items", [])) > 0
+        assert has_data, "T-28 requires a populated DB; no devices found"
         return {"has_data": has_data}
 
     runner.test("T-28 Valid token — returns data", t28)
 
     def t29():
         # Write-only token scenario (simulated with invalid token)
-        limited = MCPClient(MCP_ENDPOINT, "nbapikey_invalid_write_only_token_00000")
+        limited = MCPClient(MCP_ENDPOINT, "0" * 40)
         result = limited.call_tool("device_list", {"limit": 5})
         assert result.get("items") == [], "Invalid token should return empty"
         return {"restricted_empty": True}
@@ -816,7 +814,7 @@ def run_uat() -> bool:
     runner.test("T-39 graphql_introspect returns valid SDL schema string", t39)
 
     def t40():
-        anon = MCPClient(MCP_ENDPOINT, "nbapikey_invalid_token_00000000000000")
+        anon = MCPClient(MCP_ENDPOINT, "a" * 40)
         result = anon.call_tool("graphql_query", {"query": "{ devices { name } }"})
         assert "data" in result
         assert "errors" in result
@@ -853,19 +851,22 @@ def run_uat() -> bool:
 
     def t43():
         # Structured error handling — graphql_query returns errors dict, not MCPToolError.
-        # Depth limit (MAX_DEPTH=8) and complexity limit (MAX_COMPLEXITY=1001) are
-        # enforced by graphql_validation rules and verified in mcp/tests/test_graphql_tool.py.
-        # Nautobot's graphene-django schema prevents constructing valid-field depth-9 or
-        # complexity-1001 queries: all non-nullable fields require sub-selections, and
-        # DeviceType has ~40 fields — insufficient to reach complexity 1001 with distinct names.
-        # This UAT test confirms structured errors are returned correctly (HTTP 200, no exception).
-        result = client.call_tool("graphql_query", {"query": "{ devices {"})
+        # Depth-limit and complexity-exceeded are enforced by graphql_validation rules.
+        # Confirm the server returns HTTP 200 with a structured errors dict (no exception).
+        # T-38 already covers "Syntax Error" for unclosed-brace; T-43 targets field errors.
+        result = client.call_tool(
+            "graphql_query",
+            {"query": "{ devices(limit: 5) { nonexistent_field } }"},
+        )
         assert result["data"] is None
         assert result["errors"] is not None and len(result["errors"]) > 0
-        assert "Syntax Error" in result["errors"][0]["message"]
-        return {"structured_errors_verified": True}
+        assert any(
+            "nonexistent_field" in str(e) or "Unknown field" in str(e)
+            for e in result["errors"]
+        ), f"Expected field-not-found error, got: {result['errors']}"
+        return {"structured_field_errors_verified": True}
 
-    runner.test("T-43 graphql_query structured errors — no exception thrown", t43)
+    runner.test("T-43 graphql_query structured field errors — no exception thrown", t43)
 
     # ---------------------------------------------------------------------------
     # Print results

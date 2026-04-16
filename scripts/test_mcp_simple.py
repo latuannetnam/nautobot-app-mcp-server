@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 # Configuration
 # ---------------------------------------------------------------------------
 
-ENV_FILE = Path(__file__).parent.parent / "nautobot_import.env"
+ENV_FILE = Path(__file__).parent.parent / "development" / "creds.env"
 if ENV_FILE.exists():
     load_dotenv(ENV_FILE)
 
@@ -121,7 +121,7 @@ class MCPClient:
         for line in text.split("\n"):
             if line.startswith("data:"):
                 return json.loads(line[5:])
-        raise RuntimeError(f"No SSE data line in response: {text[:200]!r}")
+        raise RuntimeError(f"No SSE data line in response: {text[:200]}")
 
 
 # ---------------------------------------------------------------------------
