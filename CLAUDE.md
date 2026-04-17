@@ -4,7 +4,7 @@ Nautobot App exposing a [Model Context Protocol (MCP)](https://modelcontextproto
 
 - **Repo:** https://github.com/latuannetnam/nautobot-app-mcp-server
 - **Python:** >=3.10, <3.15 | **Nautobot:** >=3.0.0, <4.0.0
-- **Version:** v1.2.0 (shipped 2026-04-07)
+- **Version:** v2.0 (shipped 2026-04-16)
 - **This app has no Django database models** (no `models.py`, `filters.py`, `forms.py`, `api/`, `migrations/`)
 
 ---
@@ -40,7 +40,7 @@ bash scripts/reset_dev_db.sh --all      # full pipeline: reset → fetch → imp
 
 # UAT (from host, hits MCP server on port 8005)
 python scripts/test_mcp_simple.py       # 8 smoke tests P-01–P-08
-python scripts/run_mcp_uat.py          # 37 full UAT tests T-01–T-36
+python scripts/run_mcp_uat.py          # 44 full UAT tests T-01–T-44
 ```
 
 **Debug imports:**
@@ -110,7 +110,14 @@ AI Agent → HTTP POST localhost:8005/mcp/
 
 **Progressive disclosure:** Core tools (`tier="core"`) always visible. App-tier tools require `mcp_enable_tools` first, then `ScopeGuardMiddleware` blocks unauthorized calls.
 
-**13 tools total:** 3 session + 10 core read. All registered via `register_mcp_tool()` in `mcp/tools/__init__.py`.
+**15 tools total:** 3 session + 10 core read + 2 GraphQL. All registered via `register_mcp_tool()` in `mcp/tools/__init__.py`.
+
+**GraphQL tools:**
+
+- `graphql_query` — arbitrary GraphQL queries via `nautobot.core.graphql.execute_query()`, depth ≤8, complexity ≤1000
+- `graphql_introspect` — returns Nautobot schema as SDL string; auth-gated (raises `ValueError` for anonymous)
+- Structured errors: all failures return HTTP 200 with `{"data": null, "errors": [...]}` — no HTTP 500s
+- No new dependencies — graphene-django and graphql-core are Nautobot transitive deps
 
 ---
 
@@ -121,6 +128,7 @@ AI Agent → HTTP POST localhost:8005/mcp/
 - Cache: `ctx.set_state("mcp:cached_user", str(user.pk))` per FastMCP session
 - Missing/invalid token → `AnonymousUser` (empty querysets via `.restrict()`)
 - **All ORM calls must use `sync_to_async(..., thread_sensitive=True)`** — FastMCP thread pool ≠ Django's main thread; skipping `thread_sensitive=True` causes "Connection not available" errors.
+- **GraphQL auth:** `graphql_introspect` raises `ValueError("Authentication required")` for anonymous users. `graphql_query` propagates auth from `get_user_from_request()`; `AnonymousUser` gets `{"data": null, "errors": [...]}` from Nautobot's GraphQL layer.
 
 ---
 
@@ -133,11 +141,13 @@ AI Agent → HTTP POST localhost:8005/mcp/
 | `docker exec ... unittest` wrong approach | Always run `invoke unittest` from **host/project root** — it delegates into the container via `run_command()` which sets all required env vars (`NAUTOBOT_CONFIG`, DB creds, etc.). Direct `docker exec` bypasses this and causes config/DB errors |
 | `invoke tests` fails after tests pass | `ruff format .` inside container |
 | "Connection not available" in async tools | Use `sync_to_async(..., thread_sensitive=True)` for ALL ORM calls |
+| Cursor pagination returns duplicates | Always add `.order_by("pk")` to querysets — without explicit ordering, `pk__gt` filtering is non-deterministic and the last item of page N can appear again as the first item of page N+1 |
 | Cursor separator in `search_by_name` | Uses `base64(f"{model}@{pk}")` — `@` used because UUIDs contain dots. List tools use plain `base64(pk)` (no separator) |
 | `outputSchema` validation error | Always pass `output_schema=None` to `mcp.tool()` |
 | `ctx.request_context` is `None` during HTTP tool calls | Use `get_http_request()` from `fastmcp.server.dependencies` |
 | `tool_registry.json` not written at startup | `post_migrate` doesn't fire in standalone process — plugin writes it at `ready()` instead |
-| Multi-worker deployments | Not supported (in-memory sessions); use `--workers 1`; Redis deferred to v2.0 |
+| Multi-worker deployments | Not supported (in-memory sessions); use `--workers 1`; Redis deferred to v3.0 |
+| Lazy imports for Django/Nautobot modules | Some modules (e.g. `nautobot.core.graphql`) require Django setup before import. Use lazy imports inside function bodies. When patching these in tests, patch at the **source module** (e.g. `patch("nautobot.core.graphql.execute_query")`), not at the consumer module — the name doesn't exist in the consumer's namespace due to the lazy import. |
 
 ---
 
@@ -169,8 +179,10 @@ nautobot_app_mcp_server/
 │   ├── tools/
 │   │   ├── __init__.py      # side-effect: @register_tool fires on import
 │   │   ├── core.py          # 10 read tools
+│   │   ├── graphql_tool.py  # graphql_query + graphql_introspect handlers
+│   │   ├── graphql_validation.py  # MaxDepthRule + QueryComplexityRule
 │   │   ├── pagination.py    # PaginatedResult
-│   │   └── query_utils.py   # Query-building helpers
+│   │   └── query_utils.py   # Query-building helpers (.order_by("pk") on all list qs)
 │   └── tests/               # Unit tests
 ├── management/commands/
 │   ├── start_mcp_server.py
