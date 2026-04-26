@@ -127,8 +127,13 @@ class QueryComplexityRule(ValidationRule):
     """
 
     def enter_document(self, node: DocumentNode, *_args: Any) -> Any:
-        """Called once per document; check total field count."""
-        complexity = _count_complexity(node)
+        # DocumentNode.definitions[0] is the OperationDefinitionNode (query/mutation/subscription)
+        # which has selection_set. DocumentNode itself has no selection_set, so we must
+        # traverse to the operation definition.
+        if not node.definitions:
+            return None
+        operation = node.definitions[0]
+        complexity = _count_complexity(operation)
         if complexity > MAX_COMPLEXITY:
             self.report_error(
                 GraphQLError(

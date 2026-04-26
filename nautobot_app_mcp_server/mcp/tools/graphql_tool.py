@@ -129,7 +129,7 @@ async def _graphql_introspect_handler(ctx: ToolContext) -> str:
         ValueError: If no authentication token is provided.
     """
     user = await get_user_from_request(ctx)
-    if user is None:
+    if user is None or (hasattr(user, "is_anonymous") and user.is_anonymous):
         raise ValueError("Authentication required")
     return await sync_to_async(_sync_graphql_introspect, thread_sensitive=True)()
 
