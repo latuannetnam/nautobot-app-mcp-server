@@ -39,7 +39,7 @@ Exit.
 ## Step 2: Check for existing documents
 
 ```bash
-INIT=$(node "/home/latuan/Local_Programming/nautobot-project/nautobot-app-mcp-server/.claude/get-shit-done/bin/gsd-tools.cjs" init map-codebase 2>/dev/null || echo "{}")
+INIT=$(gsd-sdk query init.map-codebase 2>/dev/null || echo "{}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
 
@@ -78,6 +78,8 @@ Task(
   model="{resolved_model}"
 )
 ```
+
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Task() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
 ## Step 5: Report
 

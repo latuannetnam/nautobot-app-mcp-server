@@ -4,7 +4,8 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { safeReadFile, loadConfig, isGitIgnored, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, planningDir, planningPaths, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal } = require('./core.cjs');
+const { safeReadFile, loadConfig, isGitIgnored, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal } = require('./core.cjs');
+const { planningDir, planningPaths } = require('./planning-workspace.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 const { MODEL_PROFILES } = require('./model-profiles.cjs');
 
@@ -831,8 +832,9 @@ function cmdStats(cwd, format, raw) {
     const headingPattern = /#{2,4}\s*Phase\s+(\d+[A-Z]?(?:\.\d+)*)\s*:\s*([^\n]+)/gi;
     let match;
     while ((match = headingPattern.exec(roadmapContent)) !== null) {
-      phasesByNumber.set(match[1], {
-        number: match[1],
+      const key = normalizePhaseName(match[1]);
+      phasesByNumber.set(key, {
+        number: key,
         name: match[2].replace(/\(INSERTED\)/i, '').trim(),
         plans: 0,
         summaries: 0,
@@ -862,9 +864,10 @@ function cmdStats(cwd, format, raw) {
 
       const status = determinePhaseStatus(plans, summaries, path.join(phasesDir, dir), 'Not Started');
 
-      const existing = phasesByNumber.get(phaseNum);
-      phasesByNumber.set(phaseNum, {
-        number: phaseNum,
+      const normalizedNum = normalizePhaseName(phaseNum);
+      const existing = phasesByNumber.get(normalizedNum);
+      phasesByNumber.set(normalizedNum, {
+        number: normalizedNum,
         name: existing?.name || phaseName,
         plans: (existing?.plans || 0) + plans,
         summaries: (existing?.summaries || 0) + summaries,

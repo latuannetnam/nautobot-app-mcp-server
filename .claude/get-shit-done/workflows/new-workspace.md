@@ -13,7 +13,7 @@ Read all files referenced by the invoking prompt's execution_context before star
 **MANDATORY FIRST STEP — Execute init command:**
 
 ```bash
-INIT=$(node "/home/latuan/Local_Programming/nautobot-project/nautobot-app-mcp-server/.claude/get-shit-done/bin/gsd-tools.cjs" init new-workspace)
+INIT=$(gsd-sdk query init.new-workspace)
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
 
@@ -73,7 +73,7 @@ Error:
 No git repos found in the current directory and this is not a git repo.
 
 Run this command from a directory containing git repos, or specify repos explicitly:
-  /gsd-new-workspace --name my-workspace --repos /path/to/repo1,/path/to/repo2
+  /gsd-workspace --new --name my-workspace --repos /path/to/repo1,/path/to/repo2
 ```
 Exit.
 
@@ -84,7 +84,7 @@ Error:
 Error: --auto requires --repos to specify which repos to include.
 
 Usage:
-  /gsd-new-workspace --name my-workspace --repos repo1,repo2 --auto
+  /gsd-workspace --new --name my-workspace --repos repo1,repo2 --auto
 ```
 Exit.
 

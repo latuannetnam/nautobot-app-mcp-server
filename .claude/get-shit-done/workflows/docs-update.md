@@ -14,9 +14,9 @@ Valid GSD subagent types (use exact names — do not fall back to 'general-purpo
 Load docs-update context:
 
 ```bash
-INIT=$(node "/home/latuan/Local_Programming/nautobot-project/nautobot-app-mcp-server/.claude/get-shit-done/bin/gsd-tools.cjs" docs-init)
+INIT=$(gsd-sdk query docs-init)
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
-AGENT_SKILLS=$(node "/home/latuan/Local_Programming/nautobot-project/nautobot-app-mcp-server/.claude/get-shit-done/bin/gsd-tools.cjs" agent-skills gsd-doc-writer 2>/dev/null)
+AGENT_SKILLS=$(gsd-sdk query agent-skills gsd-doc-writer)
 ```
 
 Extract from init JSON:
@@ -448,6 +448,8 @@ Write the doc file directly. Return confirmation only — do not return doc cont
 
 **CRITICAL:** Agent prompts must contain ONLY the `<doc_assignment>` block, the `${AGENT_SKILLS}` variable, and the return instruction. Do not include project planning context, workflow prose, or any internal tooling references in agent prompts.
 
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling all Wave 1 Task() calls above with `run_in_background=true`, do NOT generate any documentation independently while the subagents are active. Wait for all Wave 1 agents to complete before proceeding. This prevents duplicate work and wasted context.
+
 Continue to collect_wave_1.
 </step>
 
@@ -665,6 +667,8 @@ Write the doc file directly. Return confirmation only — do not return doc cont
 
 **CRITICAL:** Agent prompts must contain ONLY the `<doc_assignment>` block, the `${AGENT_SKILLS}` variable, and the return instruction. Do not include project planning context, workflow prose, or any internal tooling references in agent prompts.
 
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling all Wave 2 Task() calls above with `run_in_background=true`, do NOT generate any documentation independently while the subagents are active. Wait for all Wave 2 agents to complete before proceeding. This prevents duplicate work and wasted context.
+
 Continue to collect_wave_2.
 </step>
 
@@ -746,6 +750,8 @@ project_context: {INIT JSON with project_root set to package directory}
 Write {package_dir}/README.md directly. Return confirmation only — do not return doc content."
 )
 ```
+
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling all per-package Task() calls above with `run_in_background=true`, do NOT generate any package READMEs independently while the subagents are active. Wait for all agents to complete via TaskOutput before proceeding. This prevents duplicate work and wasted context.
 
 Collect confirmations via TaskOutput for all package agents. Note failures in the final report.
 
@@ -1054,7 +1060,7 @@ Only run this step if `commit_docs` is `true` from the init JSON. If `commit_doc
 Assemble the list of files that were actually generated (do not include files that failed or were skipped):
 
 ```bash
-node "/home/latuan/Local_Programming/nautobot-project/nautobot-app-mcp-server/.claude/get-shit-done/bin/gsd-tools.cjs" commit "docs: generate project documentation" \
+gsd-sdk query commit "docs: generate project documentation" \
   --files README.md docs/ARCHITECTURE.md docs/CONFIGURATION.md docs/GETTING-STARTED.md docs/DEVELOPMENT.md docs/TESTING.md
 # Append any conditional docs that were generated:
 # --files ... docs/API.md docs/DEPLOYMENT.md CONTRIBUTING.md
