@@ -47,6 +47,15 @@ def create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple:
     # the management command to override it at startup if needed.
     _PLUGINS_CONFIG = os.environ.get("PLUGINS_CONFIG")
 
+    # STEP 0c: GraphQL-only mode — restrict to exactly graphql_query and graphql_introspect.
+    # Default is True (GQL-only mode on). Set NAUTOBOT_MCP_ENABLE_ALL=true to show all 15 tools.
+    # Read once at startup and store as module-level constant so both _list_tools_handler
+    # and ScopeGuardMiddleware can import it without re-reading os.environ at call time.
+    GRAPHQL_ONLY_MODE: bool = os.environ.get("NAUTOBOT_MCP_ENABLE_ALL", "false").lower() != "true"
+
+    # The explicit allowlist — exactly 2 tools, known at design time.
+    _ALLOWED_GQL_ONLY_TOOLS = ("graphql_query", "graphql_introspect")
+
     # STEP 1: Bootstrap Django via nautobot.setup() FIRST — required before any
     # Django ORM access.
     nautobot.setup()
