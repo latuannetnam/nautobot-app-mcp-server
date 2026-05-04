@@ -148,6 +148,7 @@ AI Agent → HTTP POST localhost:8005/mcp/
 | `tool_registry.json` not written at startup | `post_migrate` doesn't fire in standalone process — plugin writes it at `ready()` instead |
 | Multi-worker deployments | Not supported (in-memory sessions); use `--workers 1`; Redis deferred to v3.0 |
 | Lazy imports for Django/Nautobot modules | Some modules (e.g. `nautobot.core.graphql`) require Django setup before import. Use lazy imports inside function bodies. When patching these in tests, patch at the **source module** (e.g. `patch("nautobot.core.graphql.execute_query")`), not at the consumer module — the name doesn't exist in the consumer's namespace due to the lazy import. |
+| GraphQL-only mode hides non-GraphQL tools | Set/unset NAUTOBOT_MCP_ENABLE_ALL env var and restart (default: GQL-only mode on) |
 
 ---
 

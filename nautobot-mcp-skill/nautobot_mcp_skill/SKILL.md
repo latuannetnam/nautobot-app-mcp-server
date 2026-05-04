@@ -145,6 +145,18 @@ print(sdl)  # View all available types and fields
 
 ---
 
+## GraphQL-Only Mode
+
+By default, the MCP server runs in GraphQL-only mode — only `graphql_query` and `graphql_introspect` are visible and callable. All other tools (10 core read tools + 3 session tools) are hidden from the manifest and blocked at call time.
+
+To enable all 15 tools, set `NAUTOBOT_MCP_ENABLE_ALL=true` and restart the server.
+
+| Env Variable | Default | Effect |
+|---|---|---|
+| `NAUTOBOT_MCP_ENABLE_ALL` | not set (=GQL-only mode) | `true` = all 15 tools visible; unset = only GraphQL tools visible |
+
+---
+
 ## Meta Tools
 
 | Tool | Description | Parameters |
