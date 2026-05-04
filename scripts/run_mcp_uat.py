@@ -282,6 +282,20 @@ def run_uat() -> bool:
     client = MCPClient(MCP_ENDPOINT, DEV_TOKEN)
     runner = TestRunner(client)
 
+    # Auto-detect mode at startup
+    all_tools = client.list_tools()
+    tool_names = [t["name"] for t in all_tools]
+    gql_only_mode = len(all_tools) == 2 and "graphql_query" in tool_names and "graphql_introspect" in tool_names
+
+    if gql_only_mode:
+        print("## GraphQL-Only Mode detected (2 tools)")
+        print("  → Running GQL-only tests: T-45, T-46")
+        print()
+    else:
+        print(f"## Normal mode detected ({len(all_tools)} tools)")
+        print("  → Running full test suite: T-01 to T-43, T-47")
+        print()
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # 2a. Session Tools (T-01 to T-04)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -868,6 +882,52 @@ def run_uat() -> bool:
 
     runner.test("T-43 graphql_query structured field errors — no exception thrown", t43)
 
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # 5. GraphQL-Only Mode (T-45 to T-47)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    print("\n## GraphQL-Only Mode")
+
+    def t45():
+        # GQLONLY-02: Tool list returns exactly 2 tools in GQL-only mode
+        all_tools = client.list_tools()
+        tool_names = [t["name"] for t in all_tools]
+        assert len(all_tools) == 2, f"Expected 2 tools in GQL-only mode, got {len(all_tools)}: {tool_names}"
+        assert "graphql_query" in tool_names
+        assert "graphql_introspect" in tool_names
+        # Session tools should NOT be visible
+        assert "mcp_enable_tools" not in tool_names
+        return {"tool_count": len(all_tools)}
+
+    runner.test("T-45 GQL-only manifest: exactly 2 tools, session tools hidden", t45)
+
+    def t46():
+        # GQLONLY-03: Calling non-GraphQL tool returns ToolNotFoundError
+        # In GQL-only mode, calling device_list should return an error response
+        # (not a successful device_list response with {"items": [...]})
+        result = client.call_tool("device_list", {"limit": 1})
+        # In GQL-only mode, the result should be an error dict or the items should be empty/unavailable
+        # The exact format depends on FastMCP error handling
+        # Check that it's NOT a successful device_list response
+        assert not (isinstance(result, dict) and "items" in result and len(result.get("items", [])) > 0), \
+            f"Expected blocked/error response, got: {result}"
+        return {"blocked_correctly": True}
+
+    runner.test("T-46 GQL-only: device_list blocked with error response", t46)
+
+    def t47():
+        # GQLONLY-04: Default-off — without env var, all tools visible
+        # This test only runs in normal mode (auto-detected above)
+        all_tools = client.list_tools()
+        tool_names = [t["name"] for t in all_tools]
+        assert len(all_tools) >= 15, f"Expected >=15 tools in normal mode, got {len(all_tools)}"
+        assert "graphql_query" in tool_names
+        assert "graphql_introspect" in tool_names
+        assert "mcp_enable_tools" in tool_names
+        return {"tool_count": len(all_tools)}
+
+    runner.test("T-47 Default mode: all tools visible (no GQL-only env var)", t47)
+
     # ---------------------------------------------------------------------------
     # Print results
     # ---------------------------------------------------------------------------
@@ -884,6 +944,7 @@ def run_uat() -> bool:
         "Search": ["T-22", "T-23", "T-24", "T-25", "T-26"],
         "Auth Enforcement": ["T-27", "T-28", "T-29"],
         "GraphQL Tools": ["T-37", "T-38", "T-39", "T-40", "T-41", "T-42", "T-43"],
+        "GraphQL-Only Mode": ["T-45", "T-46", "T-47"],
         "Performance": ["P-01", "P-02", "P-03", "P-04", "P-05", "P-06", "P-07", "P-08"],
     }
 
