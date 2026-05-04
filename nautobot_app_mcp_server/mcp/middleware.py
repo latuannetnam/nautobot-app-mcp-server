@@ -21,6 +21,7 @@ from fastmcp.server.middleware.middleware import MiddlewareContext
 from mcp.types import CallToolRequestParams
 
 from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry
+from nautobot_app_mcp_server.mcp.commands import GRAPHQL_ONLY_MODE, _ALLOWED_GQL_ONLY_TOOLS
 
 # State key — must match session_tools._ENABLED_SCOPES_KEY
 _ENABLED_SCOPES_KEY = "mcp:enabled_scopes"
@@ -54,6 +55,16 @@ class ScopeGuardMiddleware(FastMCPMiddleware):
         params = context.message  # CallToolRequestParams — has .name (NOT context.method)
         registry = MCPToolRegistry.get_instance()
         tool = registry._tools.get(params.name)
+
+        # GQL-only mode: block all non-GraphQL tools.
+        # This is a security backstop — even if client bypasses manifest, call is blocked.
+        if GRAPHQL_ONLY_MODE:
+            if params.name not in _ALLOWED_GQL_ONLY_TOOLS:
+                raise ToolNotFoundError(
+                    f"Tool '{params.name}' is not available in GraphQL-only mode. "
+                    f"Only graphql_query and graphql_introspect are available."
+                )
+            # Fall through to normal handling (allow the call)
 
         # Core tools: always pass through (no scope check needed)
         if tool is None or tool.tier == "core":

@@ -33,6 +33,7 @@ from fastmcp.server.context import Context as ToolContext
 from mcp.types import Tool as ToolInstance
 
 from nautobot_app_mcp_server.mcp import register_tool
+from nautobot_app_mcp_server.mcp.commands import GRAPHQL_ONLY_MODE, _ALLOWED_GQL_ONLY_TOOLS
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -143,6 +144,9 @@ async def _list_tools_handler(
 ) -> list[ToolInstance]:
     """Return tools filtered by session state (progressive disclosure).
 
+    In GRAPHQL_ONLY_MODE, returns only graphql_query and graphql_introspect
+    regardless of session state. Core tools are hidden. Session tools are hidden.
+
     Always includes core tools (tier="core"). Non-core tools are included if:
         - Their scope matches any entry in session state (scope hierarchy)
         - OR their name/description fuzzy-matches an enabled search term
@@ -159,6 +163,20 @@ async def _list_tools_handler(
     from nautobot_app_mcp_server.mcp.registry import MCPToolRegistry
 
     registry = MCPToolRegistry.get_instance()
+
+    # GQL-only mode: manifest shows only the 2 allowed GraphQL tools.
+    # Session tools (mcp_enable_tools etc.) are hidden per D-05.
+    if GRAPHQL_ONLY_MODE:
+        all_tools = registry.get_all()
+        return [
+            ToolInstance(
+                name=t.name,
+                description=t.description,
+                inputSchema=t.input_schema,
+            )
+            for t in all_tools
+            if t.name in _ALLOWED_GQL_ONLY_TOOLS
+        ]
 
     # Core tools: always included
     core_tools = registry.get_core_tools()
