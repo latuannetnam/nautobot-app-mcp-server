@@ -74,17 +74,16 @@ AI agents can query Nautobot network inventory data via MCP tools with full Naut
 
 ---
 
-## Current Milestone: v3.0 — Future Planning
+## Current Milestone: v2.1 — GraphQL-Only Mode
 
-**Status:** Not started. Run `/gsd-new-milestone` to define scope.
+**Goal:** Add a config-driven env var (`NAUTOBOT_MCP_GRAPHQL_ONLY=true`) that restricts the MCP server to exposing only `graphql_query` and `graphql_introspect`, hiding all session tools and core read tools.
 
-**Candidate features:**
-
-- Write tools (create/update/delete) — requires permission modeling and transactional safety
-- Redis session backend for `--workers > 1` horizontal scaling
-- Tool-level field permissions
-- Dry-run / validation mode for GraphQL queries
-- Query result caching (TTL cache keyed on `user_pk + query_hash`)
+**Target features:**
+- `NAUTOBOT_MCP_GRAPHQL_ONLY` env var support — read at server startup
+- `_list_tools_handler` filter — returns only the two GraphQL tools when flag is active
+- `ScopeGuardMiddleware` enforcement — blocks calls to all non-GraphQL tools at tool-call time
+- Unit tests for the new filtering logic
+- CLAUDE.md / SKILL.md documentation update
 
 ## Evolution
 
@@ -107,4 +106,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-*Last updated: 2026-04-17 after v2.0 GraphQL MCP Tool milestone shipped*
+*Last updated: 2026-05-04 — milestone v2.1 GraphQL-Only Mode started*

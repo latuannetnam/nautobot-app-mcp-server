@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: v3.0
-milestone_name: Future Planning
+milestone: v2.1
+milestone_name: GraphQL-Only Mode
 status: planning
-last_updated: "2026-04-17"
-last_activity: 2026-04-17
+last_updated: "2026-05-04"
+last_activity: 2026-05-04
 progress:
   total_phases: 0
   completed_phases: 0
@@ -15,15 +15,16 @@ progress:
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-04-17 (v2.0 GraphQL MCP Tool shipped)
+**Last updated:** 2026-05-04 (milestone v2.1 GraphQL-Only Mode started)
 
 ---
 
 ## Current Position
 
-v2.0 milestone complete. Ready for v3.0 planning.
-
-**Next action:** `/gsd-new-milestone` to define v3.0 scope.
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-04 — Milestone v2.1 started
 
 ---
 
