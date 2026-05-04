@@ -1,8 +1,8 @@
 # Project Roadmap — `nautobot-app-mcp-server`
 
 **Project:** Nautobot App MCP Server
-**Horizon:** v3.0
-**Last updated:** 2026-04-17 — v2.0 GraphQL MCP Tool shipped
+**Horizon:** v2.1
+**Last updated:** 2026-05-04 — v2.1 GraphQL-Only Mode started
 
 ---
 
@@ -12,7 +12,7 @@
 - ✅ **v1.1.0** — Phases 5–6 (shipped 2026-04-04)
 - ✅ **v1.2.0** — Phases 7–13 (shipped 2026-04-07)
 - ✅ **v2.0** — Phases 14–17 (shipped 2026-04-16)
-- 📋 **v3.0** — Future planning (not started)
+- 🚀 **v2.1** — Phase 18 (in progress)
 
 ---
 
@@ -38,6 +38,7 @@
 | 15 | Introspection & Permissions | v2.0 | 3/3 | Complete | 2026-04-15 |
 | 16 | Security Hardening | v2.0 | 4/4 | Complete | 2026-04-16 |
 | 17 | UAT & Documentation | v2.0 | 4/4 | Complete | 2026-04-16 |
+| 18 | GraphQL-Only Mode | v2.1 | — | Pending | — |
 
 ---
 
@@ -97,20 +98,40 @@
 
 ---
 
+## v2.1 — GraphQL-Only Mode
+
+**Status:** In progress (Phase 18)
+
+### Phase 18: GraphQL-Only Mode
+
+**Goal:** Implement `NAUTOBOT_MCP_GRAPHQL_ONLY` env var that restricts the MCP server to exposing only `graphql_query` and `graphql_introspect`.
+
+**Requirements:** GQLONLY-01, GQLONLY-02, GQLONLY-03, GQLONLY-04, GQLONLY-05, GQLONLY-06
+
+**Success criteria:**
+
+1. `NAUTOBOT_MCP_GRAPHQL_ONLY=true` env var can be set and is read at server startup in `commands.py` / `create_app()`
+2. When the flag is active, `_list_tools_handler` returns exactly `graphql_query` and `graphql_introspect` — verified by calling `tools/list` with the flag set
+3. When the flag is active, calling any non-GraphQL tool (e.g. `device_list`) raises a `ToolNotFoundError` — verified by unit test of `ScopeGuardMiddleware`
+4. Without the env var, all 15 tools appear in the tool list (existing behavior unchanged)
+5. Unit tests for GQLONLY-02, GQLONLY-03, GQLONLY-04 pass (`invoke unittest`)
+6. `NAUTOBOT_MCP_GRAPHQL_ONLY` appears in CLAUDE.md (Environment or Gotchas section) and SKILL.md
+
+---
+
 ## v3.0 — Future Planning
 
 **Status:** Not started
 
 Candidate features for next milestone:
+
 - Write tools (create/update/delete) — requires permission modeling and transactional safety
 - Redis session backend for `--workers > 1` horizontal scaling
 - Tool-level field permissions
 - Dry-run / validation mode for GraphQL queries
 - Query result caching (TTL cache keyed on `user_pk + query_hash`)
 
-**Next step:** `/gsd-new-milestone` to define v3.0 scope.
-
 ---
 
-*Roadmap last updated: 2026-04-17 — v2.0 GraphQL MCP Tool shipped*
+*Roadmap last updated: 2026-05-04 — v2.1 GraphQL-Only Mode started*
 *Archived milestones: `.planning/milestones/`*

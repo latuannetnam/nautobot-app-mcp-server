@@ -26,9 +26,9 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| GQLONLY-01 | — | Pending |
-| GQLONLY-02 | — | Pending |
-| GQLONLY-03 | — | Pending |
-| GQLONLY-04 | — | Pending |
-| GQLONLY-05 | — | Pending |
-| GQLONLY-06 | — | Pending |
+| GQLONLY-01 | Phase 18 | Pending |
+| GQLONLY-02 | Phase 18 | Pending |
+| GQLONLY-03 | Phase 18 | Pending |
+| GQLONLY-04 | Phase 18 | Pending |
+| GQLONLY-05 | Phase 18 | Pending |
+| GQLONLY-06 | Phase 18 | Pending |
