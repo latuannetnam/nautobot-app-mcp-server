@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from django.test import TestCase
 
 
@@ -26,17 +24,13 @@ class TestCreateApp(TestCase):
 
         The MCP server trusts that the DB is healthy (depends_on: db: healthy in
         Docker Compose) and defers connectivity checks to request time.  This
-        means create_app() does NOT call connection.ensure_connection(), so
-        mocking it has no effect on the return value.
+        means create_app() does NOT call connection.ensure_connection(), and
+        connection is not imported at module level in commands.py.
         """
-        from nautobot_app_mcp_server.mcp.commands import create_app
+        import nautobot_app_mcp_server.mcp.commands as commands_module
 
-        with patch(
-            "nautobot_app_mcp_server.mcp.commands.connection.ensure_connection",
-            side_effect=Exception("unreachable"),
-        ):
-            # create_app() must still return a valid (mcp, host, port) tuple
-            # even when ensure_connection would fail — there is no explicit call.
-            result = create_app(host="127.0.0.1", port=9000)
-            self.assertIsInstance(result, tuple)
-            self.assertEqual(len(result), 3)
+        # Verify connection is not imported at module level
+        self.assertFalse(
+            hasattr(commands_module, "connection"),
+            "django.db.connection should not be imported at module level",
+        )

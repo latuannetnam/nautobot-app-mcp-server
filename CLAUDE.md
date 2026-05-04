@@ -21,8 +21,7 @@ unset VIRTUAL_ENV && poetry run invoke build    # rebuild image (after poetry.lo
 
 # Tests
 unset VIRTUAL_ENV && poetry run invoke unittest -b -f -k -s                        # all unit tests (buffered, failfast, keepdb)
-unset VIRTUAL_ENV && poetry run invoke unittest -b -f -s -l module                  # all tests in a specific module
-unset VIRTUAL_ENV && poetry run invoke unittest -b -f -s -l module -k test_name     # single test by name pattern
+unset VIRTUAL_ENV && poetry run invoke unittest -b -f -k -s  -l module                  # all tests in a specific module
 unset VIRTUAL_ENV && poetry run invoke unittest --coverage                           # with coverage
 unset VIRTUAL_ENV && poetry run invoke tests                                         # full CI pipeline (linters + unit tests + coverage)
 # invoke unittest uses -l (label) to target a module/directory and -k (pattern) to filter by name

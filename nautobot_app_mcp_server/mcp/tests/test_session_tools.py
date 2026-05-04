@@ -310,7 +310,11 @@ class ScopeHierarchyTestCase(TestCase):
 
 
 class ProgressiveDisclosureIntegrationTestCase(TestCase):
-    """Integration: _list_tools_handler reads from ctx.get_state() (P3-01)."""
+    """Integration: _list_tools_handler reads from ctx.get_state() (P3-01).
+
+    Tests import _list_tools_handler directly, which forces session_tools to
+    load if it hasn't already — no explicit sys.modules management needed.
+    """
 
     def test_list_tools_handler_uses_fastmcp_state_api(self):
         """_list_tools_handler reads enabled_scopes via ctx.get_state() (not _mcp_tool_state).
@@ -318,48 +322,55 @@ class ProgressiveDisclosureIntegrationTestCase(TestCase):
         Phase 10 replaced RequestContext._mcp_tool_state monkey-patch with
         FastMCP's ctx.get_state() API. This test verifies the integration.
         """
-        from nautobot_app_mcp_server.mcp.session_tools import _list_tools_handler
+        from unittest.mock import patch
 
-        registry = MCPToolRegistry.get_instance()
-        registry.register(
-            ToolDefinition(
-                name="test_rctx_tool",
-                func=lambda: None,
-                description="Test tool for FastMCP state API",
-                input_schema={"type": "object"},
-                tier="app",
-                app_label="test_app",
-                scope="test_app.rctx",
+        with patch("nautobot_app_mcp_server.mcp.session_tools.GRAPHQL_ONLY_MODE", False):
+            from nautobot_app_mcp_server.mcp.session_tools import _list_tools_handler
+
+            registry = MCPToolRegistry.get_instance()
+            registry.register(
+                ToolDefinition(
+                    name="test_rctx_tool",
+                    func=lambda: None,
+                    description="Test tool for FastMCP state API",
+                    input_schema={"type": "object"},
+                    tier="app",
+                    app_label="test_app",
+                    scope="test_app.rctx",
+                )
             )
-        )
-        try:
-            # Build mock ctx using new FastMCP state API pattern
-            mock_ctx = _make_mock_ctx(enabled_scopes={"test_app.rctx"}, enabled_searches=set())
+            try:
+                # Build mock ctx using new FastMCP state API pattern
+                mock_ctx = _make_mock_ctx(enabled_scopes={"test_app.rctx"}, enabled_searches=set())
 
-            tools = asyncio.get_event_loop().run_until_complete(_list_tools_handler(mock_ctx))
+                tools = asyncio.get_event_loop().run_until_complete(_list_tools_handler(mock_ctx))
 
-            tool_names = [t.name for t in tools]
-            # test_app.rctx scope is enabled → tool should be returned
-            self.assertIn("test_rctx_tool", tool_names)
-            # Core tools should always be present
-            self.assertIn("mcp_enable_tools", tool_names)
-        finally:
-            del registry._tools["test_rctx_tool"]  # pylint: disable=protected-access
+                tool_names = [t.name for t in tools]
+                # test_app.rctx scope is enabled → tool should be returned
+                self.assertIn("test_rctx_tool", tool_names)
+                # Core tools should always be present
+                self.assertIn("mcp_enable_tools", tool_names)
+            finally:
+                del registry._tools["test_rctx_tool"]  # pylint: disable=protected-access
 
     def test_list_tools_handler_no_scope_returns_core_only(self):
         """When no scopes are enabled, only core tools are returned."""
-        from nautobot_app_mcp_server.mcp.session_tools import _list_tools_handler
+        # Patch GRAPHQL_ONLY_MODE so the full tool set is used (not GQL-only filter path)
+        from unittest.mock import patch
 
-        mock_ctx = _make_mock_ctx(enabled_scopes=set(), enabled_searches=set())
-        tools = asyncio.get_event_loop().run_until_complete(_list_tools_handler(mock_ctx))
-        tool_names = [t.name for t in tools]
+        with patch("nautobot_app_mcp_server.mcp.session_tools.GRAPHQL_ONLY_MODE", False):
+            from nautobot_app_mcp_server.mcp.session_tools import _list_tools_handler
 
-        # Core tools present
-        self.assertIn("mcp_enable_tools", tool_names)
-        # App-scoped tools NOT present (none enabled)
-        # (mcp_list_tools and mcp_disable_tools are also core)
-        for name in tool_names:
-            self.assertNotEqual(name, "test_rctx_tool")
+            mock_ctx = _make_mock_ctx(enabled_scopes=set(), enabled_searches=set())
+            tools = asyncio.get_event_loop().run_until_complete(_list_tools_handler(mock_ctx))
+            tool_names = [t.name for t in tools]
+
+            # Core tools present
+            self.assertIn("mcp_enable_tools", tool_names)
+            # App-scoped tools NOT present (none enabled)
+            # (mcp_list_tools and mcp_disable_tools are also core)
+            for name in tool_names:
+                self.assertNotEqual(name, "test_rctx_tool")
 
 
 # -------------------------------------------------------------------
@@ -395,6 +406,8 @@ class MCPToolRegistrationTestCase(TestCase):
 
     def test_session_tools_in_registry(self):
         """mcp_enable_tools, mcp_disable_tools, mcp_list_tools registered on registry."""
+        # Re-import session_tools to re-trigger @register_tool after setUpClass popped it
+        import nautobot_app_mcp_server.mcp.session_tools  # noqa: F401
 
         registry = MCPToolRegistry.get_instance()
         all_tools = registry.get_all()
@@ -418,7 +431,29 @@ class MCPToolRegistrationTestCase(TestCase):
 
 
 class ScopeGuardMiddlewareTestCase(TestCase):
-    """Test ScopeGuardMiddleware on_call_tool enforcement (P3-03)."""
+    """Test ScopeGuardMiddleware on_call_tool enforcement (P3-03).
+
+    Patches GRAPHQL_ONLY_MODE to False so app-tier tools are not blocked
+    by the GQL-only filter in the middleware.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Patch GRAPHQL_ONLY_MODE to False so app tools are not GQL-filtered."""
+        import sys
+        from unittest.mock import patch
+
+        cls._gql_only_patch = patch(
+            "nautobot_app_mcp_server.mcp.middleware.GRAPHQL_ONLY_MODE", False
+        )
+        cls._gql_only_patch.start()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        """Stop the GRAPHQL_ONLY_MODE patch."""
+        cls._gql_only_patch.stop()
+        super().tearDownClass()
 
     def _make_middleware_context(self, tool_name: str, enabled_scopes: set[str] | None = None) -> tuple:
         """Build a MiddlewareContext + call_next for ScopeGuardMiddleware testing."""
