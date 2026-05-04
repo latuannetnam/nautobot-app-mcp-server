@@ -38,7 +38,7 @@
 | 15 | Introspection & Permissions | v2.0 | 3/3 | Complete | 2026-04-15 |
 | 16 | Security Hardening | v2.0 | 4/4 | Complete | 2026-04-16 |
 | 17 | UAT & Documentation | v2.0 | 4/4 | Complete | 2026-04-16 |
-| 18 | GraphQL-Only Mode | v2.1 | — | Pending | — |
+| 18 | GraphQL-Only Mode | v2.1 | 5/5 | Pending | — |
 
 ---
 
@@ -107,6 +107,15 @@
 **Goal:** Implement `NAUTOBOT_MCP_GRAPHQL_ONLY` env var that restricts the MCP server to exposing only `graphql_query` and `graphql_introspect`.
 
 **Requirements:** GQLONLY-01, GQLONLY-02, GQLONLY-03, GQLONLY-04, GQLONLY-05, GQLONLY-06
+
+**Plans:** 5 plans
+
+Plans:
+- [ ] 18-01-PLAN.md — Add GRAPHQL_ONLY_MODE constant + ALLOWED_GQL_ONLY_TOOLS tuple to commands.py
+- [ ] 18-02-PLAN.md — Implement two-layer enforcement in session_tools.py and middleware.py
+- [ ] 18-03-PLAN.md — Create unit tests for GQLONLY-01 through GQLONLY-05
+- [ ] 18-04-PLAN.md — Add UAT tests T-45, T-46, T-47 with auto-detection
+- [ ] 18-05-PLAN.md — Document NAUTOBOT_MCP_GRAPHQL_ONLY in CLAUDE.md and SKILL.md
 
 **Success criteria:**
 
