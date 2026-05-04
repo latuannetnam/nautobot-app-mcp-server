@@ -6,11 +6,11 @@
 
 ## Summary
 
-Phase 18 adds `NAUTOBOT_MCP_GRAPHQL_ONLY=true` env var support to the standalone FastMCP MCP server. When set at server startup, exactly two tools (`graphql_query`, `graphql_introspect`) are exposed in the tool manifest and callable. All other tools (10 core read tools + 3 session tools) are hidden and blocked. The implementation uses a module-level `GRAPHQL_ONLY_MODE` boolean constant set in `create_app()` before middleware/tool registration.
+Phase 18 adds `NAUTOBOT_MCP_ENABLE_ALL` env var support. When **not** set (default), the MCP server runs in GraphQL-only mode — exactly two tools (`graphql_query`, `graphql_introspect`) are exposed in the tool manifest and callable. All other tools (10 core read tools + 3 session tools) are hidden and blocked. Set `NAUTOBOT_MCP_ENABLE_ALL=true` to enable all 15 tools (normal mode). The implementation uses a module-level `GRAPHQL_ONLY_MODE` boolean constant set in `create_app()` before middleware/tool registration.
 
 The enforcement is two-layered: `_list_tools_handler` in `session_tools.py` filters the manifest at `tools/list` time, and `ScopeGuardMiddleware.on_call_tool()` in `middleware.py` blocks calls to non-GraphQL tools at call time. This belt-and-suspenders approach ensures clients cannot bypass the manifest to call hidden tools.
 
-**Primary recommendation:** Store `GRAPHQL_ONLY_MODE` as a module-level boolean in `commands.py` (matching the D-03 decision). Read it via `os.environ.get("NAUTOBOT_MCP_GRAPHQL_ONLY", "false").lower() == "true"` before `nautobot.setup()`. Both `_list_tools_handler` and `ScopeGuardMiddleware` import the constant directly.
+**Primary recommendation:** Store `GRAPHQL_ONLY_MODE` as a module-level boolean in `commands.py` (matching the D-03 decision). Default is `True` (GQL-only mode on). Read it via `os.environ.get("NAUTOBOT_MCP_ENABLE_ALL", "false").lower() != "true"` before `nautobot.setup()`. Both `_list_tools_handler` and `ScopeGuardMiddleware` import the constant directly.
 
 ## Architectural Responsibility Map
 
@@ -24,7 +24,7 @@ The enforcement is two-layered: `_list_tools_handler` in `session_tools.py` filt
 ## User Constraints (from CONTEXT.md)
 
 ### Locked Decisions
-- **D-01:** Flag read in `create_app()` via `os.environ.get("NAUTOBOT_MCP_GRAPHQL_ONLY", "false").lower() == "true"`
+- **D-01:** Flag read in `create_app()` via `os.environ.get("NAUTOBOT_MCP_ENABLE_ALL", "false").lower() != "true"` (default is GQL-only mode, True)
 - **D-02:** Both layers enforced: `_list_tools_handler` filters manifest AND `ScopeGuardMiddleware` blocks calls
 - **D-03:** Module-level constant (`GRAPHQL_ONLY_MODE` in `commands.py`)
 - **D-04:** Blocked calls raise `ToolNotFoundError` (reuse existing exception from `middleware.py`)
@@ -48,10 +48,10 @@ None.
 
 | ID | Description | Research Support |
 |----|-------------|------------------|
-| GQLONLY-01 | `NAUTOBOT_MCP_GRAPHQL_ONLY=true` starts server in GQL-only mode | `create_app()` reads env vars; pattern from `NAUTOBOT_CONFIG` read |
+| GQLONLY-01 | `NAUTOBOT_MCP_ENABLE_ALL=true` enables all-tools mode (GQL-only is default) | `create_app()` reads env vars; pattern from `NAUTOBOT_CONFIG` read |
 | GQLONLY-02 | GQL-only: manifest returns exactly `graphql_query` + `graphql_introspect` | `_list_tools_handler` filters by name when `GRAPHQL_ONLY_MODE=True` |
 | GQLONLY-03 | GQL-only: non-GraphQL tool calls blocked with clear error | `ScopeGuardMiddleware.on_call_tool()` raises `ToolNotFoundError` for non-GraphQL tools |
-| GQLONLY-04 | Default (no env var): all 15 tools visible | Normal mode passes through existing `_list_tools_handler` unchanged |
+| GQLONLY-04 | Default (no env var): GQL-only mode active (GRAPHQL_ONLY_MODE=True) | Normal mode passes through existing `_list_tools_handler` unchanged |
 | GQLONLY-05 | Unit tests cover: manifest filtering, call-time blocking, default-off | `test_session_tools.py` patterns for `_list_tools_handler`; `test_graphql_tool.py` patterns for GQL tools |
 | GQLONLY-06 | Documented in CLAUDE.md + SKILL.md | Gotchas table row + SKILL.md new section |
 
@@ -73,20 +73,20 @@ None.
 _NAUTOBOT_CONFIG = os.environ.get("NAUTOBOT_CONFIG", "nautobot_config")
 _PLUGINS_CONFIG = os.environ.get("PLUGINS_CONFIG")
 ```
-Same pattern for `NAUTOBOT_MCP_GRAPHQL_ONLY`.
+Same pattern for `NAUTOBOT_MCP_ENABLE_ALL` (inverted: `!= "true"` since default is GQL-only mode).
 
 ## Architecture Patterns
 
 ### System Architecture Diagram
 
 ```
-[env: NAUTOBOT_MCP_GRAPHQL_ONLY=true]
+[env: NAUTOBOT_MCP_ENABLE_ALL=true]
          │
          ▼
 commands.py: create_app()
     │
-    ├─► reads os.environ.get("NAUTOBOT_MCP_GRAPHQL_ONLY", "false").lower() == "true"
-    │   sets GRAPHQL_ONLY_MODE = True  (module-level constant)
+    ├─► reads os.environ.get("NAUTOBOT_MCP_ENABLE_ALL", "false").lower() != "true"
+    │   sets GRAPHQL_ONLY_MODE = False  (all-tools mode)
     │
     ├─► nautobot.setup()
     │
@@ -109,6 +109,8 @@ commands.py: create_app()
          │                   │
          │                   └─► if GRAPHQL_ONLY_MODE:
          │                           return only [graphql_query, graphql_introspect]
+         │                       else:
+         │                           return all 15 tools
          │
          └─► tools/call → ScopeGuardMiddleware.on_call_tool()
                              │
@@ -136,7 +138,8 @@ nautobot_app_mcp_server/mcp/
 **Example:**
 ```python
 # commands.py (after STEP 0 env reads)
-GRAPHQL_ONLY_MODE: bool = os.environ.get("NAUTOBOT_MCP_GRAPHQL_ONLY", "false").lower() == "true"
+# Default: GQL-only mode (GRAPHQL_ONLY_MODE=True)
+GRAPHQL_ONLY_MODE: bool = os.environ.get("NAUTOBOT_MCP_ENABLE_ALL", "false").lower() != "true"
 
 # middleware.py (import at top)
 from nautobot_app_mcp_server.mcp.commands import GRAPHQL_ONLY_MODE
@@ -221,7 +224,7 @@ _ALLOWED_GQL_ONLY_TOOLS = ("graphql_query", "graphql_introspect")
 
 ### Pitfall 4: Lazy Import Mismatch
 **What goes wrong:** Patching `nautobot_app_mcp_server.mcp.commands.GRAPHQL_ONLY_MODE` in tests doesn't work because the test imports `commands` via `from nautobot_app_mcp_server.mcp.commands import GRAPHQL_ONLY_MODE`, creating a local binding.
-**How to avoid:** Patch at the module level in tests: `patch("nautobot_app_mcp_server.mcp.commands.GRAPHQL_ONLY_MODE", True)`. Or use an environment variable patch: `patch.dict(os.environ, {"NAUTOBOT_MCP_GRAPHQL_ONLY": "true"})`.
+**How to avoid:** Patch at the module level in tests: `patch("nautobot_app_mcp_server.mcp.commands.GRAPHQL_ONLY_MODE", True)`. Or use an environment variable patch: `patch.dict(os.environ, {"NAUTOBOT_MCP_ENABLE_ALL": "true"})` (sets GRAPHQL_ONLY_MODE=False).
 
 ## Code Examples
 
@@ -229,7 +232,8 @@ _ALLOWED_GQL_ONLY_TOOLS = ("graphql_query", "graphql_introspect")
 
 ```python
 # Somewhere near STEP 0 (before nautobot.setup() is called)
-GRAPHQL_ONLY_MODE: bool = os.environ.get("NAUTOBOT_MCP_GRAPHQL_ONLY", "false").lower() == "true"
+# Default: GQL-only mode (GRAPHQL_ONLY_MODE=True)
+GRAPHQL_ONLY_MODE: bool = os.environ.get("NAUTOBOT_MCP_ENABLE_ALL", "false").lower() != "true"
 ```
 
 Verified: Pattern matches existing `NAUTOBOT_CONFIG` and `PLUGINS_CONFIG` reads in same function. No new library needed.
@@ -364,7 +368,7 @@ def run_uat() -> bool:
 ### Phase Requirements -> Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| GQLONLY-01 | Env var `NAUTOBOT_MCP_GRAPHQL_ONLY=true` activates GQL-only mode | unit | `test_commands.py::test_graphql_only_mode_env_var` | new file |
+| GQLONLY-01 | Env var `NAUTOBOT_MCP_ENABLE_ALL=true` enables all-tools mode (GQL-only is default) | unit | `test_commands.py::test_graphql_only_mode_env_var` | new file |
 | GQLONLY-02 | `_list_tools_handler` returns only 2 tools when flag is True | unit | `test_graphql_only_mode.py::test_list_tools_handler_gql_only_returns_two_tools` | new file |
 | GQLONLY-03 | `ScopeGuardMiddleware` blocks non-GraphQL tools when flag is True | unit | `test_graphql_only_mode.py::test_middleware_blocks_non_graphql_tools` | new file |
 | GQLONLY-04 | Default mode (no env var) shows all 15 tools | unit | `test_graphql_only_mode.py::test_default_mode_all_tools_visible` | new file |

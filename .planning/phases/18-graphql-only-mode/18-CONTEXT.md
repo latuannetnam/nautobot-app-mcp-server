@@ -6,7 +6,7 @@
 <domain>
 ## Phase Boundary
 
-Add `NAUTOBOT_MCP_GRAPHQL_ONLY` env var support. When set to `true` at server startup, the MCP server exposes exactly `graphql_query` and `graphql_introspect` — all other tools (core read tools + session tools) are hidden from the manifest and blocked at call time. Without the env var, all 15 tools behave identically to v2.0.
+Add `NAUTOBOT_MCP_ENABLE_ALL` env var support. When **not** set (default), the MCP server runs in GraphQL-only mode — exactly `graphql_query` and `graphql_introspect` are visible and callable. All other tools (core read tools + session tools) are hidden from the manifest and blocked at call time. Set `NAUTOBOT_MCP_ENABLE_ALL=true` to show all 15 tools (normal mode).
 
 </domain>
 
@@ -14,7 +14,7 @@ Add `NAUTOBOT_MCP_GRAPHQL_ONLY` env var support. When set to `true` at server st
 ## Implementation Decisions
 
 ### Enforcement Architecture
-- **D-01:** The flag is read in `create_app()` (`commands.py`) from `os.environ.get("NAUTOBOT_MCP_GRAPHQL_ONLY", "false").lower() == "true"` at server startup — same pattern as `NAUTOBOT_CONFIG`
+- **D-01:** The flag is read in `create_app()` (`commands.py`) from `os.environ.get("NAUTOBOT_MCP_ENABLE_ALL", "false").lower() != "true"` at server startup — same pattern as `NAUTOBOT_CONFIG`. Default is GQL-only mode (True).
 - **D-02:** Enforcement is **both layers** — `_list_tools_handler` filters the manifest (GQLONLY-02) AND `ScopeGuardMiddleware` blocks calls (GQLONLY-03). Belt-and-suspenders.
 - **D-03:** The flag is stored as a **module-level constant** (e.g. `GRAPHQL_ONLY_MODE: bool` in `commands.py` or a dedicated config module). Both `_list_tools_handler` and `ScopeGuardMiddleware` import it. No re-reading env at call time.
 - **D-04:** Blocked tool calls raise `ToolNotFoundError` (reuse existing exception from `middleware.py`) with a GQL-only-specific message. Consistent with existing blocked-call behavior.
@@ -32,8 +32,8 @@ Add `NAUTOBOT_MCP_GRAPHQL_ONLY` env var support. When set to `true` at server st
 - **D-09:** UAT script **auto-detects** server mode at startup by calling `tools/list`. If only 2 tools appear → GQL-only mode → run T-45/T-46, skip T-01–T-44. If 15 tools → normal mode → run T-01–T-44, skip GQL-only tests. T-47 (default-off) only runs in normal mode.
 
 ### Documentation (GQLONLY-06)
-- **D-10:** `CLAUDE.md` — add one row to the existing **Gotchas table**: `| GraphQL-only mode hides non-GraphQL tools | Set/unset NAUTOBOT_MCP_GRAPHQL_ONLY env var and restart |`
-- **D-11:** `SKILL.md` — add a short **GraphQL-Only Mode** section: env var name, what it does (only `graphql_query` + `graphql_introspect` visible and callable), how to enable (restart with `NAUTOBOT_MCP_GRAPHQL_ONLY=true`). No workflow examples needed.
+- **D-10:** `CLAUDE.md` — add one row to the existing **Gotchas table**: `| GraphQL-only mode hides non-GraphQL tools | Set/unset NAUTOBOT_MCP_ENABLE_ALL env var and restart (default: GQL-only mode on) |`
+- **D-11:** `SKILL.md` — add a short **GraphQL-Only Mode** section: env var name, what it does (only `graphql_query` + `graphql_introspect` visible and callable), how to enable all tools (set `NAUTOBOT_MCP_ENABLE_ALL=true`; default is GQL-only mode).
 
 ### Claude's Discretion
 - Exact module/location for the `GRAPHQL_ONLY_MODE` constant (could be `commands.py` module-level or a new `config.py`)
@@ -64,7 +64,7 @@ Add `NAUTOBOT_MCP_GRAPHQL_ONLY` env var support. When set to `true` at server st
 - `.planning/ROADMAP.md` §Phase 18 — success criteria (6 items)
 
 ### Documentation targets
-- `CLAUDE.md` — Gotchas table: add `NAUTOBOT_MCP_GRAPHQL_ONLY` row
+- `CLAUDE.md` — Gotchas table: add `NAUTOBOT_MCP_ENABLE_ALL` row
 - `nautobot-mcp-skill/nautobot_mcp_skill/SKILL.md` — add GraphQL-Only Mode section
 
 </canonical_refs>
@@ -80,7 +80,7 @@ Add `NAUTOBOT_MCP_GRAPHQL_ONLY` env var support. When set to `true` at server st
 - `TestRunner` / `MCPClient` in `scripts/run_mcp_uat.py` — reuse unchanged for T-45/T-46/T-47
 
 ### Established Patterns
-- Env var reads in `create_app()`: `os.environ.get("NAUTOBOT_CONFIG", "nautobot_config")` — follow exact same pattern for `NAUTOBOT_MCP_GRAPHQL_ONLY`
+- Env var reads in `create_app()`: `os.environ.get("NAUTOBOT_CONFIG", "nautobot_config")` — follow exact same pattern for `NAUTOBOT_MCP_ENABLE_ALL` (inverted: `!= "true"` since default is GQL-only mode)
 - `tier="core"` means "always callable" in current `ScopeGuardMiddleware` — GQL-only mode overrides this by name, not tier
 - Unit tests patch `nautobot.core.graphql.execute_query` at **source** (not consumer) due to lazy imports — follow same lazy-import patch pattern
 
