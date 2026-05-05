@@ -1,8 +1,8 @@
 # Project Roadmap — `nautobot-app-mcp-server`
 
 **Project:** Nautobot App MCP Server
-**Horizon:** v2.1
-**Last updated:** 2026-05-04 — v2.1 GraphQL-Only Mode started
+**Horizon:** v3.0
+**Last updated:** 2026-05-05 — v2.1 GraphQL-Only Mode shipped
 
 ---
 
@@ -12,7 +12,7 @@
 - ✅ **v1.1.0** — Phases 5–6 (shipped 2026-04-04)
 - ✅ **v1.2.0** — Phases 7–13 (shipped 2026-04-07)
 - ✅ **v2.0** — Phases 14–17 (shipped 2026-04-16)
-- 🚀 **v2.1** — Phase 18 (in progress)
+- ✅ **v2.1** — Phase 18 (shipped 2026-05-04)
 
 ---
 
@@ -98,33 +98,29 @@
 
 ---
 
-## v2.1 — GraphQL-Only Mode
+## v2.1 Archived
 
-**Status:** In progress (Phase 18)
+<details>
+<summary>✅ v2.1 — GraphQL-Only Mode (SHIPPED 2026-05-04)</summary>
 
-### Phase 18: GraphQL-Only Mode
+**Goal:** Implement `NAUTOBOT_MCP_ENABLE_ALL` env var that restricts the MCP server to exposing only `graphql_query` and `graphql_introspect`.
 
-**Goal:** Implement `NAUTOBOT_MCP_GRAPHQL_ONLY` env var that restricts the MCP server to exposing only `graphql_query` and `graphql_introspect`.
+**What shipped:**
 
-**Requirements:** GQLONLY-01, GQLONLY-02, GQLONLY-03, GQLONLY-04, GQLONLY-05, GQLONLY-06
+- `GRAPHQL_ONLY_MODE` constant in `commands.py` (default: GQL-only on)
+- Two-layer enforcement: manifest filter (`GQLOnlyTransform`) + middleware call blocker (`ScopeGuardMiddleware`)
+- UAT split into two scripts: `run_mcp_uat_all_tools.py` (45 tests) and `run_mcp_uat_gql_only.py` (2 tests)
+- CLAUDE.md + SKILL.md documentation updated
+- Obsolete `run_mcp_uat.py` (944 lines) and `test_mcp_simple.py` (201 lines) removed
 
-**Plans:** 5 plans
+**Key decisions:**
+- GQL-only default (safe by default for security-sensitive deployments)
+- Two-layer enforcement ensures defense in depth
 
-Plans:
-- [x] 18-01-PLAN.md — Add GRAPHQL_ONLY_MODE constant + ALLOWED_GQL_ONLY_TOOLS tuple to commands.py
-- [x] 18-02-PLAN.md — Implement two-layer enforcement in session_tools.py and middleware.py
-- [x] 18-03-PLAN.md — Create unit tests for GQLONLY-01 through GQLONLY-05
-- [x] 18-04-PLAN.md — Add UAT tests T-45, T-46, T-47 with auto-detection
-- [x] 18-05-PLAN.md — Document NAUTOBOT_MCP_ENABLE_ALL in CLAUDE.md and SKILL.md
+**Phase details:** `.planning/milestones/v2.1-ROADMAP.md`
+**Requirements:** `.planning/milestones/v2.1-REQUIREMENTS.md`
 
-**Success criteria:**
-
-1. `NAUTOBOT_MCP_GRAPHQL_ONLY=true` env var can be set and is read at server startup in `commands.py` / `create_app()`
-2. When the flag is active, `_list_tools_handler` returns exactly `graphql_query` and `graphql_introspect` — verified by calling `tools/list` with the flag set
-3. When the flag is active, calling any non-GraphQL tool (e.g. `device_list`) raises a `ToolNotFoundError` — verified by unit test of `ScopeGuardMiddleware`
-4. Without the env var, all 15 tools appear in the tool list (existing behavior unchanged)
-5. Unit tests for GQLONLY-02, GQLONLY-03, GQLONLY-04 pass (`invoke unittest`)
-6. `NAUTOBOT_MCP_GRAPHQL_ONLY` appears in CLAUDE.md (Environment or Gotchas section) and SKILL.md
+</details>
 
 ---
 
@@ -142,5 +138,5 @@ Candidate features for next milestone:
 
 ---
 
-*Roadmap last updated: 2026-05-04 — v2.1 GraphQL-Only Mode started*
+*Roadmap last updated: 2026-05-05 — v2.1 GraphQL-Only Mode shipped*
 *Archived milestones: `.planning/milestones/`*

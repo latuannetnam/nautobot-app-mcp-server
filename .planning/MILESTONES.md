@@ -1,5 +1,23 @@
 # Milestones
 
+## v2.1 GraphQL-Only Mode (Shipped: 2026-05-04)
+
+**Phases completed:** 1 phase (18), 5 plans, all complete
+**Git range:** 2c2b3b2 → dffa274 (9 commits)
+**Files changed:** 22 files, +1063/-478 lines
+
+**Key accomplishments:**
+
+- Added `GRAPHQL_ONLY_MODE` constant in `commands.py` (default: GQL-only on)
+- Two-layer GQL-only enforcement: manifest filter (`GQLOnlyTransform`) + middleware call blocker (`ScopeGuardMiddleware`)
+- Split UAT into `run_mcp_uat_all_tools.py` (45 tests) and `run_mcp_uat_gql_only.py` (2 tests)
+- Removed obsolete `run_mcp_uat.py` (944 lines) and `test_mcp_simple.py` (201 lines)
+- CLAUDE.md + SKILL.md documentation updated with `NAUTOBOT_MCP_ENABLE_ALL` env var
+
+**Known deferred items:** None
+
+---
+
 ## v2.0 GraphQL MCP Tool (Shipped: 2026-04-16)
 
 **Phases completed:** 5 phases, 6 plans, 10 tasks

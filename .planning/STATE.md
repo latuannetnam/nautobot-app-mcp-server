@@ -1,34 +1,41 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.1
-milestone_name: GraphQL-Only Mode
-status: active
-last_updated: "2026-05-04"
-last_activity: 2026-05-04
+milestone: v3.0
+milestone_name: ""
+status: planning
+last_updated: "2026-05-05"
+last_activity: 2026-05-05
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State — `nautobot-app-mcp-server`
 
-**Last updated:** 2026-05-04 (milestone v2.1 GraphQL-Only Mode started)
+**Last updated:** 2026-05-05 (milestone v2.1 GraphQL-Only Mode shipped)
 
 ---
 
 ## Current Position
 
-Phase: 18 Complete (GraphQL-Only Mode)
-Plan: All 5 plans complete
-Status: Phase verified and marked complete
-Last activity: 2026-05-04 — Phase 18 complete (v2.1)
+Milestone: v2.1 shipped (2026-05-04) — GraphQL-Only Mode
+Next milestone: v3.0 — Not started
+Last activity: 2026-05-05 — v2.1 milestone complete
 
 ---
 
 ## Milestone Summary
+
+**v2.1 (GraphQL-Only Mode) — SHIPPED 2026-05-04**
+
+- `GRAPHQL_ONLY_MODE` constant in `commands.py` (default: GQL-only on)
+- Two-layer enforcement: manifest filter (`GQLOnlyTransform`) + middleware call blocker (`ScopeGuardMiddleware`)
+- UAT split: `run_mcp_uat_all_tools.py` (45 tests) + `run_mcp_uat_gql_only.py` (2 tests)
+- Removed obsolete `run_mcp_uat.py` (944 lines) and `test_mcp_simple.py` (201 lines)
+- CLAUDE.md + SKILL.md documentation updated
 
 **v2.0 (GraphQL MCP Tool) — SHIPPED 2026-04-16**
 
@@ -66,13 +73,13 @@ Last activity: 2026-05-04 — Phase 18 complete (v2.1)
 
 ## Phase Status
 
-| Phase | Name | Status | Completed |
-|---|---|---|---|
-| 14 | GraphQL Tool Scaffold | Complete | 2026-04-15 |
-| 15 | Introspection & Permissions | Complete | 2026-04-15 |
-| 16 | Security Hardening | Complete | 2026-04-16 |
-| 17 | UAT & Documentation | Complete | 2026-04-16 |
-| 18 | GraphQL-Only Mode | Complete | 2026-05-04 |
+| Phase | Name | Milestone | Status | Completed |
+|---|---|---|---|---|
+| 0–4 | Project Setup → SKILL.md Package | v1.0 | Complete | 2026-04-01–04-02 |
+| 5–6 | MCP Server Refactor → UAT | v1.1.0 | Complete | 2026-04-04 |
+| 7–13 | Setup → UAT & Validation | v1.2.0 | Complete | 2026-04-05–04-07 |
+| 14–17 | GraphQL Tool Scaffold → UAT | v2.0 | Complete | 2026-04-15–04-16 |
+| 18 | GraphQL-Only Mode | v2.1 | Complete | 2026-05-04 |
 
 ---
 
@@ -84,14 +91,15 @@ Last activity: 2026-05-04 — Phase 18 complete (v2.1)
 | v1.1.0 | 2026-04-04 | Phases 5–6 | Embedded FastMCP refactor |
 | v1.2.0 | 2026-04-07 | Phases 7–13 | Separate process refactor |
 | v2.0 | 2026-04-16 | Phases 14–17 | GraphQL MCP Tool |
+| v2.1 | 2026-05-04 | Phase 18 | GraphQL-Only Mode |
 
 ---
 
 ## Next Steps
 
-- Milestone v2.1 is complete. Run `/gsd-new-milestone` to define v3.0 scope.
+- Milestone v2.1 shipped. Run `/gsd-new-milestone` to define v3.0 scope.
 - Candidate features: Write tools, Redis session backend, tool-level field permissions
 
 ---
 
-*State last updated: 2026-04-17*
+*State last updated: 2026-05-05 — v2.1 shipped, v3.0 planning*
