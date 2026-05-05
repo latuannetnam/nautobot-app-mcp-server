@@ -39,7 +39,8 @@ bash scripts/reset_dev_db.sh --all      # full pipeline: reset → fetch → imp
 
 # UAT (from host, hits MCP server on port 8005)
 python scripts/test_mcp_simple.py       # 8 smoke tests P-01–P-08
-python scripts/run_mcp_uat.py          # 44 full UAT tests T-01–T-44
+python scripts/run_mcp_uat_all_tools.py  # 45 tests (T-01–T-43, T-47) — requires NAUTOBOT_MCP_ENABLE_ALL=true in development/creds.env
+python scripts/run_mcp_uat_gql_only.py   # 2 tests (T-45, T-46) — default GQL-only mode (no extra config needed)
 ```
 
 **Debug imports:**
@@ -147,7 +148,7 @@ AI Agent → HTTP POST localhost:8005/mcp/
 | `tool_registry.json` not written at startup | `post_migrate` doesn't fire in standalone process — plugin writes it at `ready()` instead |
 | Multi-worker deployments | Not supported (in-memory sessions); use `--workers 1`; Redis deferred to v3.0 |
 | Lazy imports for Django/Nautobot modules | Some modules (e.g. `nautobot.core.graphql`) require Django setup before import. Use lazy imports inside function bodies. When patching these in tests, patch at the **source module** (e.g. `patch("nautobot.core.graphql.execute_query")`), not at the consumer module — the name doesn't exist in the consumer's namespace due to the lazy import. |
-| GraphQL-only mode hides non-GraphQL tools | Set/unset NAUTOBOT_MCP_ENABLE_ALL env var and restart (default: GQL-only mode on) |
+| `NAUTOBOT_MCP_ENABLE_ALL` in creds.env | Enables all 15 tools (default: only 2 GraphQL tools visible). Restart required after toggle. |
 
 ---
 
@@ -189,6 +190,6 @@ nautobot_app_mcp_server/
 │   ├── start_mcp_dev_server.py
 │   └── import_production_data.py
 ├── development/             # Docker Compose + env files
-├── scripts/                  # test_mcp_simple.py, run_mcp_uat.py, reset_dev_db.sh
+├── scripts/                  # run_mcp_uat_all_tools.py, run_mcp_uat_gql_only.py, reset_dev_db.sh
 └── docs/dev/                # Developer docs
 ```

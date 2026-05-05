@@ -14,6 +14,10 @@ import os
 
 import nautobot
 
+from fastmcp.server.transforms import Transform
+from mcp.types import Tool as MCP_Tool
+from typing import Sequence
+
 # STEP 0c: GraphQL-only mode — restrict to exactly graphql_query and graphql_introspect.
 # Default is True (GQL-only mode on). Set NAUTOBOT_MCP_ENABLE_ALL=true to show all 15 tools.
 # Read once at startup and store as module-level constant so both _list_tools_handler
@@ -22,6 +26,25 @@ GRAPHQL_ONLY_MODE: bool = os.environ.get("NAUTOBOT_MCP_ENABLE_ALL", "false").low
 
 # The explicit allowlist — exactly 2 tools, known at design time.
 _ALLOWED_GQL_ONLY_TOOLS = ("graphql_query", "graphql_introspect")
+
+
+class GQLOnlyTransform(Transform):
+    """Filter tool manifest to GraphQL-only tools when GRAPHQL_ONLY_MODE is active.
+
+    This Transform intercepts the tools/list response at the FastMCP layer,
+    filtering the tool manifest so clients see only graphql_query and graphql_introspect.
+    Combined with ScopeGuardMiddleware (which blocks calls to non-GraphQL tools),
+    this provides a complete GQL-only experience.
+
+    The transform is applied AFTER _list_tools_handler has already filtered the
+    registry — at the FastMCP AggregateProvider level. This means the manifest
+    shows exactly the filtered set regardless of session state.
+    """
+
+    async def list_tools(self, tools: Sequence[MCP_Tool]) -> Sequence[MCP_Tool]:
+        if GRAPHQL_ONLY_MODE:
+            return [t for t in tools if t.name in _ALLOWED_GQL_ONLY_TOOLS]
+        return tools
 
 
 def create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple:
@@ -82,6 +105,14 @@ def create_app(host: str = "0.0.0.0", port: int = 8005) -> tuple:
         # via mcp.run(transport="http", ...) or mcp.http_app(transport="http").
         # FastMCP 3.x does NOT accept these in the constructor.
     )
+
+    # STEP 3b: Apply GraphQL-only transform (Phase 18).
+    # GQLOnlyTransform filters the tools/list manifest at the FastMCP layer so
+    # clients see only graphql_query + graphql_introspect. This complements
+    # _list_tools_handler filtering AND ScopeGuardMiddleware call-blocking.
+    # We add it early (before tool registration) so it wraps all registered tools.
+    _gql_transform = GQLOnlyTransform()
+    mcp.add_transform(_gql_transform)
 
     # STEP 4a: Read tool_registry.json for cross-process discovery.
     # Written by NautobotAppMcpServerConfig.ready() (Phase 7 in INSTALLED_APPS).

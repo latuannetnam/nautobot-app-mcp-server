@@ -31,7 +31,9 @@ The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an open 
 
 ## MCP Tools
 
-The server exposes **13 tools** — 3 session tools and 10 core read tools. All read tools respect Nautobot's object-level permissions, so AI agents see only what the associated Nautobot user is permitted to view.
+The server exposes **15 tools** total — 3 session tools, 10 core read tools, and 2 GraphQL tools. All read tools respect Nautobot's object-level permissions.
+
+> **GraphQL-Only Mode (default):** By default only the 2 GraphQL tools (`graphql_query` and `graphql_introspect`) are visible. Set `NAUTOBOT_MCP_ENABLE_ALL=true` in `development/creds.env` and restart to see all 15 tools.
 
 ### Session Tools
 
@@ -50,11 +52,20 @@ Session tools control progressive disclosure — what subset of tools the MCP ma
 | `device_list` | List network devices with status, platform, location, role, and tenant |
 | `device_get` | Get a single device by name or UUID, with interfaces prefetched |
 | `interface_list` | List network interfaces, optionally filtered by device name |
+| `interface_get` | Get a single interface by name or UUID, with IP addresses prefetched |
 | `ipaddress_list` | List IP addresses with VRF, tenant, status, and role |
+| `ipaddress_get` | Get a single IP address by address or UUID, with interfaces prefetched |
 | `prefix_list` | List network prefixes with VRF, tenant, status, and role |
 | `vlan_list` | List VLANs with site/group, status, and role |
 | `location_list` | List locations with location type, parent, and tenant |
 | `search_by_name` | Multi-model name search across devices, interfaces, IPs, prefixes, VLANs, and locations |
+
+### GraphQL Tools
+
+| Tool | Description |
+| --- | --- |
+| `graphql_query` | Execute arbitrary GraphQL queries against Nautobot with depth ≤8 and complexity ≤1000 limits |
+| `graphql_introspect` | Return the Nautobot GraphQL schema as an SDL string |
 
 ## Installation
 
@@ -341,7 +352,7 @@ The FastMCP server uses Nautobot's ORM and Token authentication infrastructure d
 ## Development
 
 - **[Development Environment Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/dev/dev_environment/)** — full setup: Docker Compose, Poetry, Invoke commands, debugging, running tests
-- **[Import & UAT Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/dev/import_and_uat/)** — importing production data into the dev DB and running the MCP UAT suite (37 scenarios in `scripts/run_mcp_uat.py`)
+- **[Import & UAT Guide](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/dev/import_and_uat/)** — importing production data into the dev DB and running the MCP UAT suite. Two scripts: `scripts/run_mcp_uat_all_tools.py` (45 tests, requires `NAUTOBOT_MCP_ENABLE_ALL=true` in `development/creds.env`) and `scripts/run_mcp_uat_gql_only.py` (2 tests, default GQL-only mode)
 - **[Extending the App](https://docs.nautobot.com/projects/nautobot-app-mcp-server/en/latest/dev/extending/)** — registering custom MCP tools from third-party Nautobot apps using the `register_mcp_tool()` plugin API
 
 ## Documentation
